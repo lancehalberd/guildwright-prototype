@@ -1,0 +1,20 @@
+{
+  "name": "guild-crafting-mockup",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "sim": "tsx scripts/simulate.ts",
+    "farm": "tsx scripts/farm.ts",
+    "build:single": "npm run build && node scripts/build-artifact.mjs",
+    "build:pages": "tsc --noEmit && vite build --mode pages"
+  },
+  "devDependencies": {
+    "tsx": "4.19.4",
+    "typescript": "5.8.3",
+    "vite": "6.3.5"
+  }
+}
