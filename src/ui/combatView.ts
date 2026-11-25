@@ -1,11 +1,10 @@
 import {monsters, quests} from '../data/quests';
-import {pendingExtraFight, shielded, willFactor, type CombatEvent} from '../engine/runner';
+import {fightStats, pendingExtraFight, shielded, willFactor, type CombatEvent} from '../engine/runner';
 import {ATTACK_ANIMS, FX_ANCHORS, FX_ANIMS, FX_URLS, HIT_EFFECTS, type Side} from './attackFx';
 import type {AbilityEffect} from '../engine/types';
 import {monsterKit} from '../engine/abilities';
 import {heroAttackUrl, heroPortrait, heroSpriteHeadroom, heroSpriteUrl} from './portraits';
 import {burnDps, shockFactor} from '../engine/ailments';
-import {getCachedStats} from '../engine/stats';
 import type {Adventurer, Ailments, GameState} from '../engine/types';
 import {h} from './dom';
 import {classIcon, monsterIcon} from './icons';
@@ -45,6 +44,10 @@ function shortNum(n: number): string {
 const AILMENT_WORDS: Record<string, [string, string]> = {burn: ['burning', 'fire'], chill: ['chilled', 'cold'], shock: ['shocked', 'lightning'], weaken: ['weakened', 'weaken'], snare: ['snared', 'snare'], blind: ['blinded', 'blind'], bleed: ['bleeding', 'bleed'], sunder: ['sundered', 'sunder'], gale: ['off balance', 'gale']};
 
 // Effect strips with a direction (drawn moving left to right, or slanted), mirrored on the hero.
+// Auto recover budgets, as shares of a run's gold after its entry fee (same as the run strip).
+const AUTO_SHARES = [0, 0.25, 0.5, 0.75, 1];
+// Self effects that come out of the caster's back, as a share of its sprite's width (Overclock's steam).
+const FX_SELF_BACK: Partial<Record<AbilityEffect, number>> = {steam: 0.42};
 const FX_MIRRORED = new Set<AbilityEffect>(['scratch', 'slash', 'stab', 'lash', 'sting', 'throw', 'web', 'dust', 'gust', 'bleed', 'drain', 'sonar', 'acid', 'steam', 'prism', 'starfall']);
 // Basic attack strips draw at this size and land up to this many px off the body's middle.
 const BASIC_FX_SCALE = 0.65;
@@ -88,6 +91,12 @@ export class CombatView {
     // Over the faded hero while they rest, in the battle view: pay to recover now. main.ts sets its
     // click and calls setRecover each frame.
     readonly recover: HTMLButtonElement;
+    // The card around it: Recover now, the auto recover budget (shared with the run strip) and a
+    // one-line status. main.ts sets onAutoRecover.
+    private readonly recoverCard: HTMLElement;
+    private readonly autoButtons: HTMLButtonElement[];
+    private readonly autoStatus: HTMLElement;
+    onAutoRecover: (share: number) => void = () => {};
     // The quest's diorama and the guild bedroom, drawn on the arena's pixel grid behind the fighters.
     // Centered across the arena with their floor row at its middle; the arena crops what doesn't fit,
     // and the full battle view (which scales the arena) lets them run on to the view's edges.
@@ -145,13 +154,22 @@ export class CombatView {
         this.monsterLayer = h('div', {class: 'monsters'});
         this.overlay = h('div', {class: 'arena-overlay'});
         this.floaters = h('div', {class: 'floaters', 'aria-hidden': 'true'});
-        this.recover = h('button', {class: 'btn small primary arena-recover', hidden: true}) as HTMLButtonElement;
+        this.recover = h('button', {class: 'btn small primary'}) as HTMLButtonElement;
+        this.autoButtons = AUTO_SHARES.map(share => h('button', {
+            title: share ? `Spend up to ${share * 100}% of the run's gold (after its entry fee) to skip resting` : 'Never pay to skip resting',
+            onclick: () => this.onAutoRecover(share),
+        }, share ? `${share * 100}%` : 'Off') as HTMLButtonElement);
+        this.autoStatus = h('div', {class: 'ar-status'});
+        this.recoverCard = h('div', {class: 'arena-recover', hidden: true},
+            this.recover,
+            h('div', {class: 'ar-auto'}, h('span', null, 'Auto'), h('div', {class: 'seg', role: 'group', 'aria-label': 'Auto recover budget'}, ...this.autoButtons)),
+            this.autoStatus);
         this.expand = h('button', {class: 'arena-expand', title: 'Open the full battle view', 'aria-label': 'Open the full battle view'},
             svgEl('<svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/></svg>')) as HTMLButtonElement;
         this.bgQuest = h('img', {class: 'arena-bg', alt: '', draggable: 'false'}) as HTMLImageElement;
         this.bgGuild = h('img', {class: 'arena-bg guild', alt: '', draggable: 'false'}) as HTMLImageElement;
         this.el = h('div', {class: 'arena', role: 'group', 'aria-label': 'Combat view'},
-            this.bgQuest, this.bgGuild, this.heroEl, this.monsterLayer, this.floaters, this.overlay, this.recover, this.expand);
+            this.bgQuest, this.bgGuild, this.heroEl, this.monsterLayer, this.floaters, this.overlay, this.recoverCard, this.expand);
     }
 
     // Runs `fn` `ms` later on the view's timeline (slowed by the dilation), unless reset() comes
@@ -260,13 +278,16 @@ export class CombatView {
         (this.heroEl.children[1] as HTMLElement).textContent = hero.name;
     }
 
-    // Shows the recover button while the hero rests here, or hides it (text null).
-    setRecover(text: string | null, enabled: boolean) {
+    // Shows the recovery card while the hero rests here, or hides it (text null): Recover now, the
+    // auto recover share in use and its status line.
+    setRecover(text: string | null, enabled: boolean, autoShare = 0, status = '') {
         const show = text !== null && this.resting;
-        this.recover.hidden = !show;
+        this.recoverCard.hidden = !show;
         if (!show) return;
         if (this.recover.textContent !== text) this.recover.textContent = text;
         this.recover.disabled = !enabled;
+        AUTO_SHARES.forEach((share, i) => this.autoButtons[i].classList.toggle('on', share === autoShare));
+        if (this.autoStatus.textContent !== status) this.autoStatus.textContent = status;
     }
 
     // Dev preview: lay out one encounter as the battle view would, with full bars and no fight.
@@ -304,7 +325,7 @@ export class CombatView {
     // monster attacks the hero. `anim` is a registry key or 'ability:<n>' for the monster's own kit
     // entry, which casts, calls its name and brings its effect when `effect` is 'auto'. Returns
     // what played, for the caption.
-    previewAttack(opts: {slot: number, anim: string, effect: string, number: 'none' | 'normal' | 'crit'}): string {
+    previewAttack(opts: {slot: number, anim: string, effect: string, number: 'none' | 'normal' | 'crit' | 'crit7' | 'crit21'}): string {
         const side: Side = opts.slot < 0 ? 'hero' : 'monster';
         const foe = this.cards.get(Math.max(0, opts.slot))?.root;
         const attacker = side === 'hero' ? this.heroEl : foe;
@@ -335,7 +356,7 @@ export class CombatView {
         if (effect.key !== 'auto') fx = effect.fx;
         this.later(() => {
             if (self) {
-                if (fx) this.abilityFx(attacker, fx, fxScale);
+                if (fx) this.abilityFx(attacker, fx, fxScale, false, true);
                 const b = entry!.buff;
                 this.float(attacker, entry!.heal ? `+${Math.round(100 * entry!.heal)}%` : b ? ({guard: 'guarded', evade: 'evasive', ward: 'warded'})[b.kind] : 'hasted', 'word heal', 0);
                 return;
@@ -348,8 +369,8 @@ export class CombatView {
                 this.float(target, word[0], `word ${word[1]}`, 0);
             }
             if (opts.number !== 'none' && (!entry || Object.keys(entry.shares).length)) {
-                const crit = opts.number === 'crit';
-                this.float(target, crit ? '248!!' : '62', `dmg ${type}${crit ? ' crit crit2' : ''}`, 0, crit ? 1.4 : 1);
+                const levels = {none: 0, normal: 0, crit: 2, crit7: 7, crit21: 21}[opts.number];
+                this.float(target, levels ? critText(124 * levels, levels) : '62', `dmg ${type}${levels ? ` crit crit${Math.min(levels, 3)}` : ''}`, 0, levels ? 1.4 : 1);
             }
         }, impact);
         return label + (fx ? ` · ${fx} effect` : '');
@@ -385,7 +406,8 @@ export class CombatView {
             this.runSig = runSig;
             this.reset();
         }
-        const stats = getCachedStats(state, adventurer);
+        // Corrosion lowers max ward mid-run, so the bars use the stats the fight uses.
+        const stats = fightStats(state, adventurer);
         this.heroMaxHp = stats.maxHealth;
         this.setHero(adventurer);
         this.heroName = adventurer.name;
@@ -507,7 +529,7 @@ export class CombatView {
         const layout = fightLayout(keys, featured);
         const split = layout.some(l => l.lead);
         // Each group (everyone, or a featured fight's leads and minions) stands in columns of at most
-        // MAX_COLUMN, filled from the column nearest the hero. Each column spreads its rows down the field.
+        // MAX_COLUMN, filled from the column nearest the hero, each from its lowest row up.
         const groups = split ? [layout.map((l, i) => l.lead ? i : -1).filter(i => i >= 0), layout.map((l, i) => l.lead ? -1 : i).filter(i => i >= 0)] : [keys.map((_, i) => i)];
         const place = new Map<number, {x: number, dx: number, row: number, count: number}>();
         groups.forEach((slots, g) => {
@@ -515,9 +537,12 @@ export class CombatView {
             const cols = slots.length <= MAX_COLUMN ? 1 : Math.max(Math.ceil(slots.length / MAX_COLUMN), Math.min(3, Math.ceil(slots.length / 3)));
             const per = Math.ceil(slots.length / cols);
             const xs = (split ? (g === 0 ? LEAD_COLUMNS : MINION_COLUMNS) : COLUMNS)[Math.min(cols, 4) - 1];
+            // Columns fill bottom-up: the hero's target (the line-up's first monster) stands in the
+            // lowest row, drawn in front, so its bar is never covered by the monster below it.
             slots.forEach((slot, j) => {
                 const c = Math.floor(j / per);
-                place.set(slot, {x: xs[Math.min(c, xs.length - 1)], dx: split ? (g === 0 ? 4 : 8) : cols > 1 ? 12 : 17, row: j % per, count: Math.min(per, slots.length - c * per)});
+                const count = Math.min(per, slots.length - c * per);
+                place.set(slot, {x: xs[Math.min(c, xs.length - 1)], dx: split ? (g === 0 ? 4 : 8) : cols > 1 ? 12 : 17, row: count - 1 - j % per, count});
             });
         });
         this.monsterLayer.classList.toggle('split', split);
@@ -583,7 +608,9 @@ export class CombatView {
     // Strips are drawn for the hero striking a monster on the right; on the hero, directional ones
     // are mirrored so they come from the monster's side. Basic attacks draw smaller and land at a
     // random spot on the body, so quick repeats don't stack into one strip that seems to rewind.
-    abilityFx(target: HTMLElement, effect: AbilityEffect, scale = 1, basic = false) {
+    // A self effect listed in FX_SELF_BACK (a fighter venting steam) comes out of the caster's back
+    // instead: shifted that share of the sprite's width away from the foe.
+    abilityFx(target: HTMLElement, effect: AbilityEffect, scale = 1, basic = false, self = false) {
         const url = FX_URLS[effect];
         if (!url) return;
         const anchor = FX_ANCHORS[effect] ?? {feet: false, ground: 56};
@@ -593,6 +620,8 @@ export class CombatView {
         const flip = target === this.heroEl && FX_MIRRORED.has(effect) ? -1 : 1;
         const size = scale !== 1 || flip < 0 ? `;scale:${flip * scale} ${scale};transform-origin:50% ${anchor.ground}px` : '';
         const dx = basic ? (Math.random() * 2 - 1) * BASIC_FX_JITTER : 0;
+        // Monsters face left, so their back is to the right; the hero's is to the left.
+        const back = self ? (FX_SELF_BACK[effect] ?? 0) * (target === this.heroEl ? -1 : 1) : 0;
         const dy = basic ? (Math.random() * 2 - 1) * BASIC_FX_JITTER * (anchor.feet ? 0.25 : 0.8) : 0;
         const el = h('div', {class: `fx fx-strip fx-${effect}`, style: `background-image:url(${url})${size}`});
         const place = () => {
@@ -601,7 +630,7 @@ export class CombatView {
             const k = arena.width / (this.el.offsetWidth || arena.width) || 1;
             const b = img ? opaqueRows(img) : {top: 0, bottom: 1};
             const at = anchor.feet ? b.bottom : (b.top + b.bottom) / 2;
-            el.style.left = `${(box.left - arena.left + box.width / 2) / k + dx}px`;
+            el.style.left = `${(box.left - arena.left + box.width * (0.5 + back)) / k + dx}px`;
             el.style.top = `${(box.top - arena.top + box.height * at) / k - anchor.ground + dy}px`;
         };
         place();
@@ -659,7 +688,7 @@ export class CombatView {
             if (e.ability) this.float(target, e.ability, 'word ability', 0);
             // A self ability (a heal, a war cry, a hatching) plays its effect on the caster now.
             if (e.onSelf) {
-                if (e.effect) this.abilityFx(target, e.effect, e.fxScale);
+                if (e.effect) this.abilityFx(target, e.effect, e.fxScale, false, true);
                 return;
             }
             this.castSlots.add(e.slot);
@@ -696,7 +725,7 @@ export class CombatView {
             // One number for the whole hit; the HP and ward bars show where it went.
             const amount = (e.amount ?? 0) + (e.ward ?? 0);
             const crit = e.critLevels ?? 0;
-            const text = `${Math.round(amount)}${'!'.repeat(Math.min(crit, 5))}`;
+            const text = critText(Math.round(amount), crit);
             const cls = `dmg ${e.damageType ?? 'physical'}${crit ? ` crit crit${Math.min(crit, 3)}` : ''}`;
             this.float(target, text, cls, e.hitIndex ?? 0, emphasis);
             if (e.side === 'monster') {
@@ -773,7 +802,7 @@ export class CombatView {
         while (this.log.childElementCount > MAX_LOG) this.log.firstElementChild?.remove();
     }
 
-    private float(target: HTMLElement, text: string, cls: string, hitIndex: number, emphasis = 1) {
+    private float(target: HTMLElement, text: string | Node, cls: string, hitIndex: number, emphasis = 1) {
         while (this.floaters.childElementCount >= MAX_FLOATERS) {
             this.floaters.firstElementChild?.remove();
         }
@@ -785,7 +814,7 @@ export class CombatView {
         const spread = (hitIndex % 2 ? 1 : -1) * Math.ceil(hitIndex / 2) * 16;
         // On the hero each kind of result starts apart and flies its own way (see FLOAT_DIRS), so a
         // block, a dodge, a reflection and the damage numbers don't pile up.
-        const dir = target === this.heroEl ? floatDir(text, cls) : null;
+        const dir = target === this.heroEl ? floatDir(typeof text === 'string' ? text : '', cls) : null;
         const [ox, oy] = dir ? FLOAT_DIRS[dir].start : [0, 0];
         const x = (box.left - arena.left + box.width / 2) / k + spread + ox + (Math.random() - 0.5) * (dir && dir !== 'up' ? 14 : 30);
         // Numbers start just above the visible head, not the sprite's transparent top rows. A
@@ -814,6 +843,16 @@ const FLOAT_DIRS: Record<FloatDir, {start: [number, number], end: [number, numbe
     // Starts at the body, below the face.
     downRight: {start: [24, 54], end: [30, 26]},
 };
+// A hit's number with its crit marks. Crits stack without a cap, so marks collapse by fours:
+// four plain "!" make one gold "!", four gold make one red, largest first (7 crits: gold ! then !!!).
+export function critText(amount: number, crit: number): string | HTMLElement {
+    if (!crit) return String(amount);
+    const red = Math.floor(crit / 16), gold = Math.floor(crit % 16 / 4), plain = crit % 4;
+    if (!red && !gold) return amount + '!'.repeat(plain);
+    const mark = (cls: string, n: number) => n ? [h('span', {class: 'critmark ' + cls}, '!'.repeat(n))] : [];
+    return h('span', {title: `${crit} crits`}, String(amount), ...mark('red', red), ...mark('gold', gold), plain ? '!'.repeat(plain) : null);
+}
+
 function floatDir(text: string, cls: string): FloatDir | null {
     if (cls.includes('reflect') && cls.includes('dmg')) return 'downRight';
     if (text === 'dodge') return 'left';

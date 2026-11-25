@@ -30,7 +30,7 @@ function lookName(classKey: string, look: Look): string {
     return names.find(n => heroLook({name: n}) === look) ?? names[0];
 }
 
-interface Prefs {tab: 'encounters' | 'classes', quest: string, index: number, cls: string, look: Look, size: 'battle' | 'panel', doubled: boolean, weapon: string, attacker: number, anim: string, effect: string, number: 'none' | 'normal' | 'crit', loop: boolean}
+interface Prefs {tab: 'encounters' | 'classes', quest: string, index: number, cls: string, look: Look, size: 'battle' | 'panel', doubled: boolean, weapon: string, attacker: number, anim: string, effect: string, number: 'none' | 'normal' | 'crit' | 'crit7' | 'crit21', loop: boolean}
 
 function loadPrefs(): Prefs {
     const base: Prefs = {tab: 'encounters', quest: questOrder[0], index: 0, cls: 'warrior', look: 'female', size: 'battle', doubled: false, weapon: '', attacker: -1, anim: 'auto', effect: 'auto', number: 'normal', loop: false};
@@ -80,7 +80,7 @@ export function openPreview(parent: HTMLElement) {
     const sideSel = h('select', {title: 'Who attacks', onchange: () => { prefs.attacker = Number(sideSel.value); prefs.anim = 'auto'; syncAttack(); }}) as HTMLSelectElement;
     const animSel = h('select', {title: 'Attack animation or monster ability', onchange: () => { prefs.anim = animSel.value; savePrefs(prefs); }}) as HTMLSelectElement;
     const effectSel = select(HIT_EFFECTS.map(e => [e.key, e.label]), prefs.effect, v => { prefs.effect = v; savePrefs(prefs); });
-    const numberSel = select([['normal', 'Damage number'], ['crit', 'Crit number'], ['none', 'No number']], prefs.number, v => { prefs.number = v as Prefs['number']; savePrefs(prefs); });
+    const numberSel = select([['normal', 'Damage number'], ['crit', 'Crit number'], ['crit7', 'Crit ×7 number'], ['crit21', 'Crit ×21 number'], ['none', 'No number']], prefs.number, v => { prefs.number = v as Prefs['number']; savePrefs(prefs); });
     const loop = h('input', {type: 'checkbox', onchange: () => { prefs.loop = loop.checked; savePrefs(prefs); restartLoop(); }}) as HTMLInputElement;
     loop.checked = prefs.loop;
     const attackNote = h('span', {class: 'muted small'});

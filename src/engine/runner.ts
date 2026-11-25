@@ -1,7 +1,7 @@
-import {passiveLevel, type PassiveKey} from '../data/passives';
+import {bloodPactBonus, passiveLevel, type PassiveKey} from '../data/passives';
 import {isPremium, PREMIUM_CHANCE, premiumKey, requireMaterial} from '../data/materials';
 import {kitHit, monsterKit, nextAbility, type KitEntry} from './abilities';
-import {classPassive, encounterLevel, encounterPower, questXpLevel, ENDLESS_PATTERN, xpMultiplier, EVASION_GROWTH, ACCURACY_GROWTH, monsterBaseline, monsters, questOrder, quests} from '../data/quests';
+import {campaignScale, classPassive, encounterLevel, encounterPower, questXpLevel, ENDLESS_PATTERN, xpMultiplier, EVASION_GROWTH, ACCURACY_GROWTH, monsterBaseline, monsters, questOrder, quests} from '../data/quests';
 import {trophyGoldXp} from '../data/trophies';
 import {addLog, addMaterial, getActiveModifiers, getQuestProgress, isQuestUnlocked} from './state';
 import {bossAmbitionFor, records} from './ambitions';
@@ -9,7 +9,7 @@ import {findContract, rollGuildContract, rollPersonalContract} from './contracts
 import {applyMods} from './mods';
 import {ailmentSeconds, BLEED_SECONDS, MIN_DOT_DPS, BLIND_CAP, blindFactor, tickBleed, BURN_SECONDS, CHILL_CAP, SHOCK_CAP, SNARE_CAP, WEAKEN_CAP, weakenFactor, GALE_CAP, SUNDER_CAP, galeFactor, sunderFactor, inflict, shockFactor, slowFactor, tickAilments, type AilmentBonus} from './ailments';
 import {armorReduce, exposedEvasion, getCachedStats, hitChance, invalidateStats, levelCap, mitigateByType, mitigateDamage, rollCritLevels, rollHits, totalXpForLevel} from './stats';
-import {activeRules, corrode, KARMA_DPS, REFLECT_SHARE} from './rules';
+import {activeRules, corrode, corrosionFactor, corrosionStackChance, KARMA_DPS, REFLECT_SHARE} from './rules';
 // The takenBy key for reflected damage (monster keys never start with a colon).
 export const REFLECT_SOURCE = ':reflect';
 import {levelUpRestock} from './shop';
@@ -239,7 +239,8 @@ export function getMonsterStats(quest: QuestDef, encounterIndex: number, monster
     // Rare encounters (and the boss fights held there) are never raised.
     // The ladder is solved on unscaled damage; the opening ease-in applies on top of it.
     const ladderScale = ladder ? encounterDamageScale(quest, encounterIndex) * openingScale(quest, encounterIndex, monsterKey) : 1;
-    const damage = monsterBaseline.damage * power * def.damage * scale * ladderScale;
+    const campaign = campaignScale(quest);
+    const damage = monsterBaseline.damage * power * def.damage * scale * ladderScale * campaign.damage;
     // Added elemental damage is a share of the base hit, on top of it.
     const shares: DamageMap = {...(def.damageTypes ?? {physical: 1})};
     let added = 0;
@@ -257,7 +258,7 @@ export function getMonsterStats(quest: QuestDef, encounterIndex: number, monster
     }
     return {
         name: def.name,
-        hp: Math.round(mod('hp', monsterBaseline.hp * power * def.hp * scale * encounterHpScale(quest, encounterIndex, monsterKey))),
+        hp: Math.round(mod('hp', monsterBaseline.hp * power * def.hp * scale * encounterHpScale(quest, encounterIndex, monsterKey) * campaign.hp)),
         damage: mod('damage', damage) * total,
         damageTypes: shares,
         attacksPerSecond: mod('attacksPerSecond', def.attacksPerSecond * openingScale(quest, encounterIndex, monsterKey)),
@@ -265,10 +266,20 @@ export function getMonsterStats(quest: QuestDef, encounterIndex: number, monster
         accuracy: mod('accuracy', monsterBaseline.accuracy * Math.pow(power, ACCURACY_GROWTH) * (def.accuracy ?? 1) * openingScale(quest, encounterIndex, monsterKey)),
         // Evasion grows slower than power so hero accuracy keeps up and multihits stay in reach.
         evasion: mod('evasion', monsterBaseline.evasion * Math.pow(power, EVASION_GROWTH) * (def.evasion ?? 1)),
-        resist: def.resist ?? {},
+        resist: monsterResist(def.resist, mods),
         baseShare: 1 / total,
         addedTypes: Object.fromEntries(Object.entries(addedTypes).map(([k, v]) => [k, v! / total])),
     };
+}
+
+// Monster resistances: their own plus what modifiers add, each capped at MONSTER_RESIST_CAP (heroes
+// cap at RESIST_CAP, 75%).
+export const MONSTER_RESIST_CAP = 0.9;
+function monsterResist(own: Partial<Record<Element, number>> | undefined, mods: QuestModifierDef[]): Partial<Record<Element, number>> {
+    const out: Partial<Record<Element, number>> = {...own};
+    for (const m of mods) for (const [e, v] of Object.entries(m.resist ?? {}) as [Element, number][]) out[e] = (out[e] ?? 0) + v;
+    for (const e of Object.keys(out) as Element[]) out[e] = Math.min(MONSTER_RESIST_CAP, out[e]!);
+    return out;
 }
 
 export function getModifierDefs(quest: QuestDef, keys: string[]): QuestModifierDef[] {
@@ -662,7 +673,7 @@ function winEncounter(state: GameState, adventurer: Adventurer, quest: QuestDef,
     const bonuses = getRewardBonuses(quest, run?.modifiers ?? []);
     // Rounded down, so far over-level heroes earn nothing here.
     const trophy = trophyGoldXp(state);
-    const xp = Math.floor(4 * power * count * (bonuses.goldXpMultiplier ?? 1) * (1 + trophy.xp) * xpMultiplier(adventurer.level, questXpLevel(quest)));
+    const xp = Math.floor(4 * power * count * (bonuses.goldXpMultiplier ?? 1) * (1 + trophy.xp) * xpMultiplier(adventurer.level, questXpLevel(quest), run?.modifiers?.length ?? 0));
     const gold = Math.round((1.5 * power * count + rng() * 2) * (bonuses.goldXpMultiplier ?? 1) * (1 + trophy.gold));
     state.gold += gold;
     // One drop, plus extras from bonuses. Each drop can be upgraded one rarity step.
@@ -1040,7 +1051,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         }
     }
     // A hit landing on the hero, from a monster or reflected: block, then armor and resistances, then
-    // ward before life. Corrosion stacks on every hit that isn't blocked. Returns false if it killed.
+    // ward before life. A hit that isn't blocked may add a Corrosion stack. Returns false if it killed.
     const landHit = (split: DamageMap, slot: number, hitIndex: number, from: string | null, reflected = false): boolean => {
         const refl = reflected ? {reflected: true} : {};
         // Sunder on the hero cuts their armor.
@@ -1077,8 +1088,12 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         }
         // Monsters' elemental hits inflict ailments too, measured against the hero's max life.
         if (from) inflict(activity.heroAilments ??= {}, takenByType, stats.maxHealth, rng);
-        if (rules.has('corrosion') && run) {
+        if (rules.has('corrosion') && run && rng() < corrosionStackChance(run.corrosion ?? 0)) {
             run.corrosion = (run.corrosion ?? 0) + 1;
+            // Max ward drops with the stack, so ward held above the new cap goes with it (Spellward's
+            // cap scales the same way).
+            const newMax = getCachedStats(state, adventurer).maxWard * corrosionFactor(run.corrosion);
+            adventurer.ward = Math.min(adventurer.ward ?? 0, spellL ? (spellL >= 2 ? 3 : 2) * newMax : newMax);
         }
         if (rampageL && taken > 0) (activity.recentHits ??= []).push({at: activity.clock ?? 0, amount: taken});
         // Ward soaks damage of any type before HP.
@@ -1140,7 +1155,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     const bloodBonus = () => {
         if (!bloodL || lifeless) return 1;
         const perSecond = stats.lifeRegen + (activity.leechPool ?? []).reduce((sum, part) => sum + part.perSecond, 0);
-        return 1 + (bloodL >= 2 ? 0.03 : 0.02) * perSecond;
+        return 1 + bloodPactBonus(bloodL, perSecond);
     };
     // One attack. A free one (Counterstrike) works like any other attack, swinging the next weapon,
     // using Riposte stacks and paying Blood pact's cost, but it doesn't add to the cooldown.
@@ -1549,10 +1564,31 @@ function closePortalIfDue(state: GameState) {
     portalEvents.push({kind: 'closed'});
 }
 
-export function tick(state: GameState, rng: Rng = Math.random) {
+// Whether the adventurer is resting at the guild between runs (or recovering from a defeat), not on
+// site before a boss or bonus fight.
+export function restingAtGuild(adventurer: Adventurer): boolean {
+    const a = adventurer.activity;
+    return a.kind === 'resting' && (!!a.defeated || !pendingExtraFight(adventurer));
+}
+
+// One tick of the world. `speed` is the game speed the caller runs ticks at: an adventurer resting
+// at the guild takes only one tick in `speed`, so rests there last their real time at any speed.
+const restCarry = new Map<string, number>();
+// The hero's stats as the current fight uses them: Corrosion's stacks applied while fighting.
+export function fightStats(state: GameState, adventurer: Adventurer) {
+    const stats = getCachedStats(state, adventurer);
+    return adventurer.activity.kind === 'fighting' ? corrode(stats, adventurer.run?.corrosion ?? 0) : stats;
+}
+
+export function tick(state: GameState, rng: Rng = Math.random, speed = 1) {
     state.time += TICK_SECONDS;
     closePortalIfDue(state);
     for (const adventurer of state.adventurers) {
+        if (speed > 1 && restingAtGuild(adventurer)) {
+            const carry = (restCarry.get(adventurer.id) ?? 0) + 1 / speed;
+            if (carry < 1 - 1e-9) { restCarry.set(adventurer.id, carry); continue; }
+            restCarry.set(adventurer.id, carry - 1);
+        }
         tickAdventurer(state, adventurer, TICK_SECONDS, rng);
     }
 }

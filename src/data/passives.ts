@@ -49,8 +49,8 @@ export const passives: Record<PassiveKey, PassiveDef> = {
         description: 'Hits deal +20% damage for each different ailment on the target, up to +60%. Your burns last twice as long, and your chill and shock can build to 75% instead of 50%.',
         enhanced: 'Hits deal +35% damage for each different ailment on the target, up to +105%. Your burns last twice as long, and your chill and shock can build to 75% instead of 50%.'},
     bloodPact: {key: 'bloodPact', name: 'Blood pact',
-        description: 'You have 5% life leech. Each attack costs 2% of current HP. Life leech heals over 1 second instead of at once, and you deal 2% more damage for each 1 HP regenerated per second, leech included.',
-        enhanced: 'You have 5% life leech. Each attack costs 2% of current HP. Life leech heals over 1 second instead of at once, and you deal 3% more damage for each 1 HP regenerated per second, leech included.'},
+        description: 'You have 5% life leech. Each attack costs 2% of current HP. Life leech heals over 1 second instead of at once. You deal +10% more damage at 1 HP regenerated per second, leech included, and the bonus doubles each time your regeneration quadruples (+20% at 4/s, +100% at 100/s, +200% at 400/s).',
+        enhanced: 'You have 5% life leech. Each attack costs 2% of current HP. Life leech heals over 1 second instead of at once. You deal +15% more damage at 1 HP regenerated per second, leech included, and the bonus doubles each time your regeneration quadruples (+30% at 4/s, +150% at 100/s, +300% at 400/s).'},
     rampage: {key: 'rampage', name: 'Rampage',
         description: '+1% damage and attack speed for every 10 damage taken in the last 4 seconds.',
         enhanced: '+1% damage and attack speed for every 10 damage taken in the last 6 seconds.'},
@@ -63,6 +63,13 @@ export const passives: Record<PassiveKey, PassiveDef> = {
 };
 
 // Strength of a passive on this hero: 0 = none, 1 = normal, 2 = enhanced.
+// Blood pact: more damage by the square root of HP regenerated per second (leech included), so the
+// bonus doubles each time regeneration quadruples. Level 2 is the enhanced passive.
+export const BLOOD_PACT_STEP = [0, 0.1, 0.15];
+export function bloodPactBonus(level: number, regenPerSecond: number): number {
+    return (BLOOD_PACT_STEP[level] ?? 0) * Math.sqrt(Math.max(0, regenPerSecond));
+}
+
 export function passiveLevel(hero: Pick<Adventurer, 'classKey' | 'passives'>, key: PassiveKey, classPassive: (classKey: string) => PassiveKey | undefined): number {
     const own = hero.passives ?? (classPassive(hero.classKey) ? [{key: classPassive(hero.classKey)!}] : []);
     const found = own.find(p => p.key === key);

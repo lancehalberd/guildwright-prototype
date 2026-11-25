@@ -358,10 +358,14 @@ export function unequip(state: GameState, adventurer: Adventurer, slot: SlotKey)
     clampHp(state, adventurer);
 }
 
-// Gear needs a level from the strongest material in it: power 1 at level 1, then 3 levels per power,
-// so a new member can't wear the guild's best gear on day one.
+// Gear needs a level from the strongest material in it, so a new member can't wear the guild's best
+// gear on day one: 3 levels per power through P5 (1, 4, 7, 10, 13), 4 per power for P6-P10
+// (17, 21, 25, 29, 33), then 5 per power from P11 (38, 43, 48, 53, 58).
 export function levelForPower(power: number): number {
-    return 1 + 3 * Math.max(0, power - 1);
+    const p = Math.max(1, power);
+    if (p <= 5) return 1 + 3 * (p - 1);
+    if (p <= 10) return 17 + 4 * (p - 6);
+    return 38 + 5 * (p - 11);
 }
 export function itemLevelRequirement(state: GameState, ref: ItemRef): number {
     if (ref.kind === 'crafted') {

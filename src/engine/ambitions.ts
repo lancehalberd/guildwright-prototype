@@ -74,7 +74,8 @@ interface Template {
 }
 
 const progressTemplates: Template[] = [
-    {kind: 'level', make: tier => ({target: [10, 25, 45, 70, 90, 95, 100, 100][tier]})},
+    // At most MAX_LEVEL_AMBITION, the highest level XP can reach in this version (75 with every modifier on the Shattered Throne).
+    {kind: 'level', make: tier => ({target: Math.min(MAX_LEVEL_AMBITION, [10, 25, 45, 70, 90, 95, 100, 100][tier])})},
     {kind: 'endless', make: (tier, _c, rng) => {
         const options: [string, number][][] = [[], [['brambleRoad', 15]], [['brambleRoad', 30], ['hollowMines', 20]], [['hollowMines', 30], ['ashenPeaks', 25], ['sunkenMarsh', 25], ['thunderheadCrags', 25]], [['ashenPeaks', 35], ['sunkenMarsh', 35], ['thunderheadCrags', 35], ['hollowMines', 40], ['sunderedRift', 20]],
             [['ashenPeaks', 50], ['sunkenMarsh', 50], ['thunderheadCrags', 50], ['hollowMines', 60], ['sunderedRift', 30]], [['ashenPeaks', 70], ['sunkenMarsh', 70], ['thunderheadCrags', 70], ['hollowMines', 80], ['sunderedRift', 45]], [['ashenPeaks', 100], ['sunkenMarsh', 100], ['thunderheadCrags', 100], ['hollowMines', 100], ['sunderedRift', 70]]];
@@ -120,6 +121,7 @@ const nextMods = [...easyMods, 'elite'];
 // A recruit only dreams of bosses on quests well above where they start, so a high-level hire can't
 // collect one on day one.
 export const BOSS_LEVEL_MARGIN = 3;
+export const MAX_LEVEL_AMBITION = 70;
 function bossAmbition(tier: number, rng: () => number, startLevel = 1): Omit<Ambition, 'tier' | 'fame' | 'kind'> | undefined {
     const options = bossQuests.filter(b => b.minTier <= tier && quests[b.quest]?.boss && questXpLevel(quests[b.quest]) >= startLevel + BOSS_LEVEL_MARGIN);
     if (!options.length) return undefined;
@@ -312,6 +314,8 @@ export function refreshApplicants(state: GameState): boolean {
 // Existing adventurers from before ambitions get a set at the guild's current tier.
 export function giveAmbitions(state: GameState, adventurer: Adventurer) {
     adventurer.ambitions ??= rollAmbitions(guildTier(state), adventurer.classKey, Math.random, adventurer.level);
+    // Older saves rolled level ambitions up to 100; they cap at MAX_LEVEL_AMBITION now.
+    for (const a of adventurer.ambitions) if (a.kind === 'level' && a.target > MAX_LEVEL_AMBITION) a.target = MAX_LEVEL_AMBITION;
     adventurer.records ??= emptyRecords();
 }
 

@@ -788,6 +788,7 @@ button.trophy-slot:hover { border-color: var(--accent); }
 .reqtag { font-size: 11px; font-family: var(--font-data); color: var(--ink-soft); margin-left: 6px; white-space: nowrap; }
 .reqtag.raises { color: var(--accent); font-weight: 600; }
 .craftedhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.craftedtitle { display: flex; align-items: baseline; gap: 8px; }
 .toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color: var(--ink-soft); }
 .recap { border-top: 1px solid var(--line); padding-top: 6px; display: flex; flex-direction: column; gap: 6px; }
 .recap h3 { margin: 0; }
@@ -1295,12 +1296,24 @@ button.trophy-slot:hover { border-color: var(--accent); }
 /* Crowded fights shrink icon avatars only; sprites keep their size, the front one included. */
 .arena .monsters.many .monster .avatar.sprite, .arena .monsters.many .monster.front .avatar.sprite { width: var(--sprite, 96px); height: var(--sprite, 96px); }
 /* Recover over the faded hero, battle view only. Sizes divide by the arena's scale. */
+/* The recovery card over the faded hero, battle view only: Recover now, the auto recover budget and
+   its status. Sizes divide by the arena's scale. */
 .arena .arena-recover { display: none; }
 .arena.big .arena-recover:not([hidden]) {
-    display: block; position: absolute; left: 22%; top: 40%; transform: translate(-50%, -50%); z-index: 302;
-    font-size: calc(14px / var(--k)); padding: calc(5px / var(--k)) calc(12px / var(--k)); border-radius: calc(6px / var(--k));
+    display: flex; flex-direction: column; align-items: center; gap: calc(5px / var(--k));
+    position: absolute; left: 22%; top: 40%; transform: translate(-50%, -50%); z-index: 302;
+    font-size: calc(12px / var(--k)); padding: calc(8px / var(--k)) calc(10px / var(--k)); border-radius: calc(8px / var(--k));
+    background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid var(--line);
     white-space: nowrap; box-shadow: 0 calc(2px / var(--k)) calc(8px / var(--k)) var(--shadow);
 }
+.arena.big .arena-recover > .btn {
+    font-size: calc(14px / var(--k)); padding: calc(5px / var(--k)) calc(12px / var(--k)); border-radius: calc(6px / var(--k));
+}
+.arena-recover .ar-auto { display: flex; align-items: center; gap: calc(6px / var(--k)); color: var(--ink-soft); }
+.arena-recover .seg button { font-size: calc(12px / var(--k)); padding: calc(2px / var(--k)) calc(6px / var(--k)); }
+.arena-recover .ar-status { color: var(--ink-soft); font-size: calc(11px / var(--k)); }
+/* Phones: the button and the budget only. */
+@media (max-width: 600px) { .arena-recover .ar-status { display: none; } .arena.big .arena-recover:not([hidden]) { left: 50%; } }
 /* The battle view strip's run details: a full-width row that scrolls when long. */
 .runstrip .rs-details {
     flex: 1 0 100%; display: flex; flex-direction: column; gap: 4px; min-width: 0;
@@ -1592,3 +1605,37 @@ img.ic.matart { width: 1.55em; height: 1.55em; vertical-align: -0.42em; margin-r
 .previewhead > .grow { min-width: 0; }
 
 .matsep { color: var(--ink-soft); font-weight: 700; padding: 0 2px; }
+
+/* Dev option (ui.hideItemIcons): no item icons in the crafted items and equip lists; the text
+   takes the room, a size up. Equipment slots keep their icons as labels. */
+body.no-item-icons .rowart.listart { display: none; }
+body.no-item-icons .craftedbody { grid-template-columns: minmax(0, 1fr); font-size: 14px; }
+body.no-item-icons .craftedbody > :not(.rowart) { grid-column: 1; }
+body.no-item-icons .gearopt { font-size: 15px; }
+body.no-item-icons .craftedbody .mods, body.no-item-icons .gearopt .mods { font-size: 13.5px; }
+
+/* Narrow screens: the header picture and subtitle sit at the top of the scrolling body (see
+   compactPanelHead in main.ts), so only the title and Close stay fixed. */
+.panel.compact-head > .panel-head { padding-block: 8px; }
+.panel.compact-head > .panel-head h2 { font-size: 20px; }
+.panel-intro { display: flex; flex-direction: column; gap: 2px; margin-bottom: -6px; }
+.panel-intro.has-art { margin-top: -12px; }
+.panel-intro .panel-header-art { width: calc(100% + 36px); margin: 0 -18px -6px; max-width: none; aspect-ratio: auto; height: 96px; }
+.panel-intro > :not(.panel-header-art) { position: relative; }
+
+/* Material links inside a toast (Recraft's missing materials) open the material's card. */
+.toast .matlink { color: inherit; text-decoration: underline; text-underline-offset: 2px; font-weight: 600; }
+.toast .matlink img.ic.matart { width: 1.3em; height: 1.3em; }
+.btn.recipe[aria-disabled="true"] { opacity: 0.55; cursor: help; }
+
+/* Collapsed crit marks (critText in combatView.ts): gold = 4 crits, red = 16, outlined so they read
+   apart from the damage type's own colour. */
+.floater .critmark { -webkit-text-stroke: 1px #2a1606; paint-order: stroke fill; }
+.floater .critmark.gold { color: #ffd23a; font-size: 1.25em; }
+.floater .critmark.red { color: #ff3b2f; font-size: 1.5em; }
+
+/* First-adventurer cards: the whole card picks that hero. */
+.startercard { cursor: pointer; transition: border-color 120ms, box-shadow 120ms, transform 120ms, background-color 120ms; }
+.startercard:hover, .startercard:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), 0 6px 16px var(--shadow); transform: translateY(-2px); outline: none; }
+.startercard:active { transform: translateY(0); box-shadow: 0 0 0 2px var(--accent); }
+@media (prefers-reduced-motion: reduce) { .startercard, .startercard:hover, .startercard:focus-visible { transition: none; transform: none; } }

@@ -5,9 +5,14 @@ import type {QuestDef, QuestRule} from './types';
 // adds. Stacks (Corrosion, Karma) live on the run, so they carry across every encounter of a run
 // and reset when the next run starts.
 
-// Corrosion: every hit the hero takes (blocked hits don't count) lowers evasion, armor, max ward,
-// block chance and resistances by 1% of their value each, adding up: 100 stacks leave nothing.
+// Corrosion: a hit the hero takes (blocked hits don't count) may add a stack, each lowering evasion,
+// armor, max ward, block chance and resistances by 1% of their value, adding up. The chance to add
+// one is 1 - stacks / CORROSION_MAX, so stacks slow as they build and stop at CORROSION_MAX.
 export const CORROSION_PER_STACK = 0.01;
+export const CORROSION_MAX = 100;
+export function corrosionStackChance(stacks: number): number {
+    return Math.max(0, 1 - stacks / CORROSION_MAX);
+}
 // Karma: every hit the hero deals, killing blows included, adds a stack. Each stack deals this much
 // physical damage a second to the hero. Armor reduces it; it can't be blocked or evaded.
 export const KARMA_DPS = 10;
@@ -17,7 +22,7 @@ export const KARMA_DPS = 10;
 export const REFLECT_SHARE = 0.05;
 
 export const ruleInfo: Record<QuestRule, {name: string, text: string}> = {
-    corrosion: {name: 'Corrosion', text: `Every hit you take (not blocked) adds a stack of Corrosion for the rest of the run. Each stack lowers evasion, armor, max ward, block chance and resistances by ${100 * CORROSION_PER_STACK}%.`},
+    corrosion: {name: 'Corrosion', text: `Hits you take (not blocked) have a chance to add a stack of Corrosion for the rest of the run. Each stack lowers evasion, armor, max ward, block chance and resistances by ${100 * CORROSION_PER_STACK}%.`},
     karma: {name: 'Karma', text: `Every hit you deal, killing blows included, adds a stack of Karma for the rest of the run. Each stack deals ${KARMA_DPS} physical damage a second to you: armor reduces it, but it can't be blocked or evaded.`},
     reflect: {name: 'Reflection', text: `${100 * REFLECT_SHARE}% of the damage of every hit you deal is reflected back at you as a hit of the same damage types. Your evasion rolls against your own accuracy, then block, armor and resistances apply.`},
     noRecovery: {name: 'Lifeless', text: 'You recover no life or ward during a run: no regen, leech, life on hit or life after encounters, and ward doesn\'t refill between encounters or from any effect. You start the run with full life and ward.'},

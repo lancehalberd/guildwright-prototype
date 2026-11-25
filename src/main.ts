@@ -1,7 +1,7 @@
 import './style.css';
 import {isPremium, materialOrder, requireMaterial} from './data/materials';
 import {classes, endlessKey, questHiddenOnMap, questOrder, questShape, quests, unlockKeys, unlockMet, unlockQuestNames} from './data/quests';
-import {devDrop, devPremiumDrop, getRecoverCost, recoverInstantly, drainCombatEvents, drainPortalEvents, pendingExtraFight, drainContractEvents, drainDropEvents, hasPendingCombatEvents, setLeaveGate, tick, TICK_SECONDS} from './engine/runner';
+import {devDrop, devPremiumDrop, getAutoRecoverBudget, getRecoverCost, recoverInstantly, drainCombatEvents, drainPortalEvents, pendingExtraFight, drainContractEvents, drainDropEvents, hasPendingCombatEvents, setLeaveGate, tick, TICK_SECONDS} from './engine/runner';
 import {ensureGuildContracts, ensurePersonalContract} from './engine/contracts';
 import {CombatView, setCombatSpeed, timeScale} from './ui/combatView';
 import {closePreview, openPreview, previewOpen} from './ui/preview';
@@ -356,6 +356,7 @@ function devMenu(): HTMLElement {
         h('button', {class: 'btn', title: 'Step through every encounter as the battle view lays it out, and every class portrait and battle sprite', onclick: () => { devOpen = false; renderAll(); openPreview(document.body); }}, 'Art preview'),
         h('button', {class: 'btn', title: 'Every source of a stat from bases, decorations and worn materials', onclick: () => { ui.panel = {kind: 'statExplorer'}; devOpen = false; renderAll(); }}, 'Stat explorer'),
         h('button', {class: 'btn', onclick: () => { showFuture = !showFuture; buildMap(); renderAll(); }}, showFuture ? 'Hide future map areas' : 'Preview future map areas'),
+        h('button', {class: 'btn', title: 'Hide the item icons in the crafted items and equip lists and use larger text there. Equipment slots keep their icons.', onclick: () => { ui.hideItemIcons = !ui.hideItemIcons; saveView(); renderAll(); }}, ui.hideItemIcons ? 'Show item icons in lists' : 'Hide item icons in lists'),
         h('button', {class: 'btn', title: 'Drag places to move them, add or remove roads and change their curves, then copy the layout', onclick: () => { devOpen = false; openLayoutEditor(); renderAll(); }}, 'Edit map layout'),
         h('button', {class: 'btn', onclick: () => {
             // Starts visits without the Hollow Mines clear that normally unlocks them.
@@ -1180,7 +1181,26 @@ function morphInto(old: Element, next: Element, path: number[]) {
     keep.after(...nodes.slice(at + 1));
     morphInto(keep, incoming, path.slice(1));
 }
+// Narrow screens: a panel's fixed head keeps only its title (plus the character panel's level line)
+// and Close. The header picture and subtitle move to the top of the scrolling body, so they scroll
+// away and the content gets the height.
+function compactPanelHead(panel: HTMLElement) {
+    if (!isNarrow() || !panel.classList.contains('panel')) return;
+    const head = panel.querySelector<HTMLElement>(':scope > .panel-head'), body = panel.querySelector<HTMLElement>(':scope > .panel-body');
+    if (!head || !body) return;
+    const art = panel.querySelector<HTMLElement>(':scope > .panel-header-art');
+    const subs = [...head.querySelectorAll<HTMLElement>(':scope > .grow > :not(h2):not(.panel-title-sub)')];
+    if (!art && !subs.length) return;
+    const intro = document.createElement('div');
+    intro.className = 'panel-intro' + (art ? ' has-art' : '');
+    if (art) intro.appendChild(art);
+    for (const sub of subs) intro.appendChild(sub);
+    body.prepend(intro);
+    panel.classList.add('compact-head');
+}
+
 function swapPanel(old: HTMLElement | null, next: HTMLElement | null, insert: (el: HTMLElement) => void): HTMLElement | null {
+    if (next) compactPanelHead(next);
     // Highlight the new markup before comparing, so a pulsing control matches its old self and is
     // kept, and its animation runs on instead of restarting with every refresh.
     if (next) markGuide(next);
@@ -1232,6 +1252,18 @@ combatView.recover.onclick = () => {
     const hero = state.adventurers.find(a => a.id === ui.hero) ?? state.adventurers[0];
     if (hero?.activity.kind === 'resting') { recoverInstantly(state, hero); renderAll(); }
 };
+combatView.onAutoRecover = share => {
+    const hero = state.adventurers.find(a => a.id === ui.hero) ?? state.adventurers[0];
+    if (hero) { hero.autoRecover = share; renderAll(); }
+};
+// The recovery card's one line about auto recover; the run strip has the full explanation.
+function autoRecoverStatus(hero: Adventurer): string {
+    const run = hero.run;
+    if (!hero.autoRecover) return 'Auto off: the rest runs its full time';
+    if (!run || run.gold <= 0) return 'Nothing to spend: this run earned no gold';
+    if (run.gold <= (run.fee ?? quests[run.questKey].entryFee)) return 'Nothing to spend: this run didn\'t cover its fee';
+    return `Auto recovers at ${getAutoRecoverBudget(hero)} gold or less`;
+}
 const battleStage = h('div', {class: 'bv-stage'}, combatView.log);
 const battleEl = h('section', {class: 'battleview', 'aria-label': 'Battle view'}, battleStage);
 let stripEl: HTMLElement | null = null;
@@ -1284,7 +1316,7 @@ function updateCombatView() {
     // A finished rest waiting on the last fight's effects has nothing left to pay for.
     const resting = hero.activity.kind === 'resting' && hero.activity.remaining > 0;
     const cost = resting ? getRecoverCost(state, hero) : 0;
-    combatView.setRecover(resting ? `Recover now · ${cost} gold` : null, state.gold >= cost);
+    combatView.setRecover(resting ? `Recover now · ${cost} gold` : null, state.gold >= cost, hero.autoRecover ?? 0, resting ? autoRecoverStatus(hero) : '');
     combatView.pace(timeScale());
     combatView.update(state, hero);
 }
@@ -1303,16 +1335,29 @@ function placeCompare() {
     const mapRect = map.getBoundingClientRect();
     const benchRect = benchEl.getBoundingClientRect();
     const top = preview ? preview.getBoundingClientRect().top - mapRect.top : 12;
+    // With the material picker open it moves right of the picker. It hides when it would cover
+    // the right-hand panel.
+    const leftEdge = (pickerEl?.isConnected ? pickerEl.getBoundingClientRect().right : benchRect.right) + 8;
+    const rightPanel = [panelEl, gearEl].filter(el => el?.isConnected).map(el => el!.getBoundingClientRect().left);
+    const limit = Math.min(mapRect.right, ...rightPanel) - 8;
+    compareEl.hidden = leftEdge + compareEl.offsetWidth > limit;
     const height = compareEl.offsetHeight;
     // Stay on screen: never above the map's top or past its bottom.
     const clamped = Math.max(8, Math.min(top, mapRect.height - height - 8));
-    compareEl.style.left = `${benchRect.right - mapRect.left + 8}px`;
+    compareEl.style.left = `${leftEdge - mapRect.left}px`;
     compareEl.style.top = `${clamped}px`;
 }
 
 function renderPanelNow() {
     ui.compareBeside = !isNarrow();
     benchEl = swapPanel(benchEl, renderBenchPanel(ctx), el => map.insertBefore(el, world));
+    pickerEl = swapPanel(pickerEl, renderPickerPanel(ctx), el => map.insertBefore(el, world));
+    recapEl = swapPanel(recapEl, renderRecapPanel(ctx), el => map.insertBefore(el, world));
+    starterEl = swapPanel(starterEl, renderStarterPick(ctx), el => map.appendChild(el));
+    panelEl = swapPanel(panelEl, renderPanel(ctx), el => gearEl?.isConnected ? gearEl.after(el) : world.after(el));
+    // The gear picker opens just left of the character panel.
+    gearEl = swapPanel(gearEl, renderGearPanel(ctx), el => world.after(el));
+    // After the picker and right panel, which it sits beside.
     const nextCompare = renderBenchCompare(ctx);
     if (compareEl?.isConnected && nextCompare) {
         // The comparison scrolls too, so it keeps its element like the panels do.
@@ -1330,12 +1375,6 @@ function renderPanelNow() {
             body.addEventListener('scroll', placeCompare, {passive: true});
         }
     }
-    pickerEl = swapPanel(pickerEl, renderPickerPanel(ctx), el => map.insertBefore(el, world));
-    recapEl = swapPanel(recapEl, renderRecapPanel(ctx), el => map.insertBefore(el, world));
-    starterEl = swapPanel(starterEl, renderStarterPick(ctx), el => map.appendChild(el));
-    panelEl = swapPanel(panelEl, renderPanel(ctx), el => gearEl?.isConnected ? gearEl.after(el) : world.after(el));
-    // The gear picker opens just left of the character panel.
-    gearEl = swapPanel(gearEl, renderGearPanel(ctx), el => world.after(el));
     if (ui.scrollTo && (panelEl || gearEl)) {
         // The target can sit in the open panel or in the picker beside it.
         const target = gearEl?.querySelector<HTMLElement>('#' + ui.scrollTo) ?? panelEl?.querySelector<HTMLElement>('#' + ui.scrollTo);
@@ -1405,7 +1444,7 @@ function renderPanelNow() {
 // Game speed, open panels, selections and scroll positions are kept in this browser, so a reload (a new build)
 // comes back to the same view. Panels are matched by their label for scroll.
 const VIEW_KEY = 'guildwright-view';
-const VIEW_FIELDS = ['panel', 'stripOpen', 'benchOpen', 'shopOpen', 'picker', 'hero', 'runPanel', 'view', 'selectedSlot', 'selectedEncounter', 'bench', 'materialDetail', 'statFilters', 'compareBeside', 'showEquipped', 'hideTooHigh', 'statExplorer', 'questTab', 'lastQuest'] as const;
+const VIEW_FIELDS = ['panel', 'stripOpen', 'benchOpen', 'shopOpen', 'picker', 'hero', 'runPanel', 'view', 'selectedSlot', 'selectedEncounter', 'bench', 'materialDetail', 'statFilters', 'compareBeside', 'showEquipped', 'hideTooHigh', 'statExplorer', 'questTab', 'lastQuest', 'hideItemIcons', 'craftedCollapsed'] as const;
 function saveView() {
     try {
         const scroll: Record<string, number> = {};
@@ -1446,6 +1485,7 @@ function restoreView() {
 }
 
 function renderAll() {
+    document.body.classList.toggle('no-item-icons', !!ui.hideItemIcons);
     renderHud();
     updateMap();
     renderPanelNow();
@@ -1797,14 +1837,14 @@ function renderDrops() {
 let toastEl: HTMLElement | null = null;
 // A toast at the bottom of the map. It takes its own taps (nothing behind it gets them), and with
 // onActivate, tapping the message itself runs it and dismisses the toast.
-function showToast(message: string, ms = 2200, onActivate?: () => void) {
+function showToast(message: string | Node, ms = 2200, onActivate?: () => void) {
     toastEl?.remove();
     const close = () => { window.clearTimeout(toastTimer); toastEl?.remove(); toastEl = null; };
     const stop = (e: Event) => e.stopPropagation();
     toastEl = h('div', {class: 'toast' + (onActivate ? ' action' : ''), role: onActivate ? 'button' : 'status',
         onpointerdown: stop, onmousedown: stop, ontouchstart: stop, onwheel: stop,
         onclick: (e: Event) => { e.stopPropagation(); if (onActivate) { close(); onActivate(); } }},
-        h('span', null, message),
+        typeof message === 'string' ? h('span', null, message) : message,
         h('button', {class: 'toastclose', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: (e: Event) => { e.stopPropagation(); close(); }}, '×'));
     map.appendChild(toastEl);
     window.clearTimeout(toastTimer);
@@ -1828,7 +1868,7 @@ function frame(now: number) {
     setHoldLevelRestock(ui.shopOpen ? (state.adventurers.find(a => a.id === ui.hero) ?? state.adventurers[0])?.id ?? null : null);
     let ticks = 0;
     while (accumulator >= TICK_SECONDS && ticks < 2000) {
-        tick(state);
+        tick(state, Math.random, speed);
         accumulator -= TICK_SECONDS;
         ticks++;
     }

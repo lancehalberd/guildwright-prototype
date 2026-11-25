@@ -1,6 +1,6 @@
 import {quests} from '../data/quests';
 import {checkProgress, createNewGame, SAVE_VERSION} from './state';
-import {giveAmbitions} from './ambitions';
+import {giveAmbitions, MAX_LEVEL_AMBITION} from './ambitions';
 import {slotUnlocks, startingGuild, unlockFame} from '../data/milestones';
 import {APPLICANT_SLOTS, applicantSlotFame, applicantSlots} from './ambitions';
 import {invalidateStats} from './stats';
@@ -162,6 +162,8 @@ function fitToQuests(state: GameState): GameState {
         (state.notices ??= []).push(`${item.name}: ${removed.map(k => requireMaterial(k).name).join(', ')} returned to your materials (too strong a decoration for its bases)`);
     }
     if (state.notices?.length) invalidateStats();
+    // Applicants' level ambitions cap like members' (see giveAmbitions).
+    for (const app of state.applicants ?? []) for (const a of app.ambitions ?? []) if (a.kind === 'level' && a.target > MAX_LEVEL_AMBITION) a.target = MAX_LEVEL_AMBITION;
     for (const adventurer of state.adventurers) {
         giveAmbitions(state, adventurer);
         const a = adventurer.activity;

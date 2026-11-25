@@ -49,6 +49,8 @@ export interface AdventurerStats {
     evasion: number
     blockChance: number
     resist: Record<Element, number>
+    // Resistances before RESIST_CAP, for display: how far past the cap the gear reaches.
+    resistTotal?: Record<Element, number>
     critChance: number
     // Damage each crit level adds, as a fraction: 0.5 = +50%, so 1.5x, then 2x, then 2.5x.
     critBonus: number
@@ -175,7 +177,8 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
     // Swings per second. Dual wielding: two swings per pair of cooldowns.
     const attacksPerSecond = strikes ? 2 / strikes.reduce((sum, st) => sum + 1 / st.attacksPerSecond, 0)
         : (martial ? 1.5 : unarmed ? 1 : weapons[0].stats.attacksPerSecond ?? 1) * speedMore;
-    const resist = Object.fromEntries(elements.map(e => [e, Math.min(RESIST_CAP, g(resistStat[e]))])) as Record<Element, number>;
+    const resistTotal = Object.fromEntries(elements.map(e => [e, g(resistStat[e])])) as Record<Element, number>;
+    const resist = Object.fromEntries(elements.map(e => [e, Math.min(RESIST_CAP, resistTotal[e])])) as Record<Element, number>;
     return {
         str, dex, int, maxHealth, damage,
         damagePerHit: damage.physical + damage.fire + damage.cold + damage.lightning,
@@ -186,6 +189,7 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
         evasion,
         blockChance: Math.min(BLOCK_CAP, g('blockChance') + parry),
         resist,
+        resistTotal,
         critChance: (int / 100 + g('critChance') + 0.15 * martial) * b('critChance'),
         critBonus: 0.5 + g('critMultiplier') + 0.5 * martial,
         rollMin: 0.85 * (1 + str / 100),

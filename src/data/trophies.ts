@@ -42,7 +42,8 @@ function questClearTrophy(questKey: string, name: string, fame: number[], kind: 
         key: 'clear-' + questKey,
         name,
         goal: t => t === 0 ? `Fully clear ${quest.name}` : `Fully clear ${quest.name} with ${t} modifier${t > 1 ? 's' : ''} active`,
-        tiers: [0, 1, 2].map((target, i) => ({target, fame: fame[i], bonus: {[kind]: amounts[i]}})),
+        // Bronze for a full clear, then silver, gold and platinum with 2, 4 and 6 modifiers active.
+        tiers: [0, 2, 4, 6].map((target, i) => ({target, fame: fame[i], bonus: {[kind]: amounts[i]}})),
         // -1 = never cleared; otherwise the most modifiers on a full clear.
         value: s => {
             const p = s.questProgress[questKey];
@@ -93,17 +94,17 @@ function statBonus(key: StatKey, amounts: number[], text: (v: number) => string)
 }
 
 export const trophyList: TrophyDef[] = [
-    questClearTrophy('brambleRoad', 'Bramble Road Waystone', [10, 10, 15], 'gold', [0.1, 0.2, 0.3]),
-    questClearTrophy('hollowMines', 'Hollow Mines Lantern', [25, 20, 30], 'xp', [0.1, 0.2, 0.3]),
-    questClearTrophy('ashenPeaks', 'Wyrmfire Brazier', [40, 30, 45], 'gold', [0.15, 0.3, 0.45]),
-    questClearTrophy('sunkenMarsh', 'Mire Lantern', [40, 30, 45], 'xp', [0.15, 0.3, 0.45]),
-    questClearTrophy('thunderheadCrags', 'Stormglass Bell', [40, 30, 45], 'gold', [0.15, 0.3, 0.45]),
-    questClearTrophy('sunderedRift', 'Riftstone Lens', [70, 50, 70], 'xp', [0.2, 0.4, 0.6]),
-    questClearTrophy('amberHive', 'Amber Reliquary', [100, 70, 100], 'gold', [0.25, 0.5, 0.75]),
-    questClearTrophy('duskgraveNecropolis', 'Funeral Bell', [100, 70, 100], 'xp', [0.25, 0.5, 0.75]),
-    questClearTrophy('ironboundFoundry', 'Brass Orrery', [100, 70, 100], 'gold', [0.25, 0.5, 0.75]),
-    questClearTrophy('skyspireAerie', 'Stormwatch Lantern', [100, 70, 100], 'xp', [0.25, 0.5, 0.75]),
-    questClearTrophy('shatteredThrone', 'Shattered Sceptre', [200, 120, 160], 'gold', [0.4, 0.8, 1.2]),
+    questClearTrophy('brambleRoad', 'Bramble Road Waystone', [10, 10, 15, 20], 'gold', [0.1, 0.2, 0.3, 0.4]),
+    questClearTrophy('hollowMines', 'Hollow Mines Lantern', [25, 20, 30, 40], 'xp', [0.1, 0.2, 0.3, 0.4]),
+    questClearTrophy('ashenPeaks', 'Wyrmfire Brazier', [40, 30, 45, 60], 'gold', [0.15, 0.3, 0.45, 0.6]),
+    questClearTrophy('sunkenMarsh', 'Mire Lantern', [40, 30, 45, 60], 'xp', [0.15, 0.3, 0.45, 0.6]),
+    questClearTrophy('thunderheadCrags', 'Stormglass Bell', [40, 30, 45, 60], 'gold', [0.15, 0.3, 0.45, 0.6]),
+    questClearTrophy('sunderedRift', 'Riftstone Lens', [70, 50, 70, 95], 'xp', [0.2, 0.4, 0.6, 0.8]),
+    questClearTrophy('amberHive', 'Amber Reliquary', [100, 70, 100, 135], 'gold', [0.25, 0.5, 0.75, 1]),
+    questClearTrophy('duskgraveNecropolis', 'Funeral Bell', [100, 70, 100, 135], 'xp', [0.25, 0.5, 0.75, 1]),
+    questClearTrophy('ironboundFoundry', 'Brass Orrery', [100, 70, 100, 135], 'gold', [0.25, 0.5, 0.75, 1]),
+    questClearTrophy('skyspireAerie', 'Stormwatch Lantern', [100, 70, 100, 135], 'xp', [0.25, 0.5, 0.75, 1]),
+    questClearTrophy('shatteredThrone', 'Shattered Sceptre', [200, 120, 160, 215], 'gold', [0.4, 0.8, 1.2, 1.6]),
     endlessTrophy('brambleRoad', 'Thornheart', [10, 20, 30],
         i => ({stats: {increasedMaxHealth: [0.05, 0.1, 0.15][i]}}), b => `+${pct(b.stats?.increasedMaxHealth ?? 0)} max HP for everyone`),
     endlessTrophy('hollowMines', 'Deepforge Ember', [15, 25, 40],

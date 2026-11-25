@@ -40,7 +40,7 @@ export const classes: Record<string, ClassDef> = {
         passiveKey: 'exploit', passive: {name: 'Exploit', description: 'Hits deal +20% damage for each different ailment on the target, up to +60%. Your burns last twice as long, and your chill and shock can build to 75%.'}},
     bloodmage: {key: 'bloodmage', suits: {weapons: ['staff', 'greatsword'], defenses: ['armor', 'ward'], note: 'Life regen and leech'}, name: 'Bloodmage', coreStat: 'int', tier: 3, growth: {str: 3, dex: 1, int: 3}, starterWeapon: 'staff', names: ['Morrigan', 'Sanguin', 'Ilyra', 'Corvus', 'Ezra'],
         description: 'Grows Int and Str: ward, HP and damage. Starts with a wooden staff.',
-        passiveKey: 'bloodPact', passive: {name: 'Blood pact', description: 'Each attack costs 2% of current HP. Life leech heals over 1 second, and you deal 2% more damage for each 1 HP regenerated per second, leech included.'}},
+        passiveKey: 'bloodPact', passive: {name: 'Blood pact', description: 'Each attack costs 2% of current HP. Life leech heals over 1 second. You deal +10% more damage at 1 HP regenerated per second, leech included, and the bonus doubles each time your regeneration quadruples (+20% at 4/s, +100% at 100/s, +200% at 400/s).'}},
     berserker: {key: 'berserker', suits: {weapons: ['axe', 'greatsword'], defenses: ['armor'], note: 'Dual wielded axes; big HP and recovery'}, name: 'Berserker', coreStat: 'str', tier: 4, growth: {str: 4, dex: 2, int: 2}, starterWeapon: 'axe', starterOffHand: 'axe', names: ['Ragna', 'Thorvald', 'Ysra', 'Gunnar', 'Sigrun'],
         description: 'Grows Str most: HP and damage. Starts with a wooden axe in each hand.',
         passiveKey: 'rampage', passive: {name: 'Rampage', description: '+1% damage and attack speed for every 10 damage taken in the last 4 seconds.'}},
@@ -888,6 +888,16 @@ export function questTier(questKey: string): number {
     return quest ? tierPowers.indexOf(quest.basePower) : 0;
 }
 
+// Campaign difficulty: every monster in a quest (bosses, summons and the quest's Endless included)
+// gets this much more life and damage, by the quest's campaign tier (index = questTier: 0 is Bramble
+// Road, 5 the Shattered Throne).
+export const CAMPAIGN_HP = [1, 1, 2, 10, 30, 100];
+export const CAMPAIGN_DAMAGE = [1, 1, 1, 1.25, 1.5, 2];
+export function campaignScale(quest: QuestDef): {hp: number, damage: number} {
+    const tier = questTier(quest.endless?.baseKey ?? quest.key);
+    return {hp: CAMPAIGN_HP[tier] ?? 1, damage: CAMPAIGN_DAMAGE[tier] ?? 1};
+}
+
 // Endless variants: one per quest, built from that quest's own encounters so each keeps its
 // threats. A repeating CCCUCCUCCR pattern starts at the quest's opening difficulty and grows linearly.
 // No items, gold or XP; it only records how deep each adventurer gets.
@@ -979,10 +989,18 @@ export function powerForLevel(level: number): number {
 export function questXpLevel(quest: QuestDef): number {
     return Math.max(...quest.encounters.map((_, i) => encounterLevel(quest, i)));
 }
-// XP drops by this share for every level the hero is above the quest, down to 0 at 5 levels over.
-export const XP_FALLOFF_PER_LEVEL = 0.2;
-export function xpMultiplier(heroLevel: number, encounterLvl: number): number {
-    return Math.max(0, 1 - XP_FALLOFF_PER_LEVEL * Math.max(0, heroLevel - encounterLvl));
+// XP falls off evenly for every level the hero is above the quest, reaching 0 this many levels over:
+// one level per 5 quest levels, rounded up, and at least 5 (Bramble Road to the Crags 5, the
+// Sanctum 7, tier 5 9, the Shattered Throne 12, so heroes can reach level 68 there).
+export const XP_FALLOFF_MIN = 5;
+export function xpFalloffLevels(questLevel: number): number {
+    return Math.max(XP_FALLOFF_MIN, Math.ceil(questLevel / 5));
+}
+// Each active modifier raises the level XP is measured against by one (the falloff range stays the
+// base quest's), so the Shattered Throne with 7 modifiers pays XP up to level 75.
+export function xpMultiplier(heroLevel: number, questLevel: number, modifierCount = 0): number {
+    const over = heroLevel - (questLevel + modifierCount);
+    return Math.max(0, 1 - Math.max(0, over) / xpFalloffLevels(questLevel));
 }
 
 // Baseline monster stats at power 1, before each monster's multipliers.

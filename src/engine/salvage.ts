@@ -1,5 +1,6 @@
 import {requireMaterial} from '../data/materials';
-import {isItemEquipped} from './state';
+import {unequip} from './state';
+import type {SlotKey} from './types';
 import type {GameState} from './types';
 
 // Salvage yard: takes a crafted item apart to recover some of its materials. It appears with Guild
@@ -59,7 +60,6 @@ export function salvageBlocked(state: GameState, itemId: string, picks: number[]
     if (!level) return 'Build the salvage yard first';
     const item = state.craftedItems.find(i => i.id === itemId);
     if (!item) return 'That item is gone';
-    if (isItemEquipped(state, itemId)) return 'Unequip it first';
     if (!picks.length) return 'Pick a material to recover';
     if (picks.length > level) return `The yard recovers up to ${level} material${level === 1 ? '' : 's'}`;
     const all = itemMaterials(state, itemId);
@@ -75,6 +75,10 @@ export function salvageItem(state: GameState, itemId: string, picks: number[]): 
     const all = itemMaterials(state, itemId);
     const materials = [...new Set(picks)].map(i => all[i]).filter(Boolean);
     state.gold -= salvageCost(materials);
+    // Worn gear comes off its wearer first.
+    for (const a of state.adventurers) {
+        for (const [slot, ref] of Object.entries(a.equipment)) if (ref?.kind === 'crafted' && ref.id === itemId) unequip(state, a, slot as SlotKey);
+    }
     state.craftedItems = state.craftedItems.filter(i => i.id !== itemId);
     // Recovered, not newly found, so it doesn't count toward materials obtained.
     for (const key of materials) state.materials[key] = (state.materials[key] ?? 0) + 1;

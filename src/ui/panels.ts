@@ -6,11 +6,11 @@ import {classIcon, itemArt, itemTypeArt, itemTypeIcon, materialIcon, monsterIcon
 import {fightLayout, monsterArtUrl} from './monsterArt';
 import {itemTypeOrder, itemTypes, slotNames, slotOrder} from '../data/items';
 import {isPremium, materialOrder, requireMaterial, roleLabel} from '../data/materials';
-import {ACCURACY_GROWTH, damageStats, questXpLevel, classes, encounterLevel, encounterPower, ENDLESS_GROWTH, ENDLESS_PATTERN, ENDLESS_STEP, xpMultiplier, endlessKey, EVASION_GROWTH, monsterBaseline, monsters, questOrder, quests, unlockMet, unlockQuestNames} from '../data/quests';
+import {ACCURACY_GROWTH, classPassive, damageStats, questXpLevel, classes, encounterLevel, encounterPower, ENDLESS_GROWTH, ENDLESS_PATTERN, ENDLESS_STEP, xpMultiplier, endlessKey, EVASION_GROWTH, monsterBaseline, monsters, questOrder, quests, unlockMet, unlockQuestNames} from '../data/quests';
 import {kitHit, monsterKit} from '../engine/abilities';
 import {itemStatRound, craftItem, DECORATION_TIER_LEAD, maxDecorationPower, getBaseLimit, getDecorationLimit, isAccessory, getBaseStats, getCraftedItemStats, getDecorationStats, getSellValue, previewCraft, decorationScale, statScale} from '../engine/crafting';
 import {baseStatEntries, CAP_RULE, elements, resistStat, familyLabel, formatStat, formatStats, formatStatValue, roundStat, statDefs, statFamily, statOrder} from '../data/stats';
-import {assignQuest, encounterLineup, pendingExtraFight, getAutoRecoverBudget, getEntryFee, getMonsterStats, getRecoverCost, typicalAttack, getRewardBonuses, recall, recoverInstantly, restSpeed, runOutcome, setStopAt, REFLECT_SOURCE} from '../engine/runner';
+import {assignQuest, encounterLineup, fightStats, pendingExtraFight, getAutoRecoverBudget, getEntryFee, getMonsterStats, getRecoverCost, typicalAttack, getRewardBonuses, recall, recoverInstantly, restSpeed, runOutcome, setStopAt, MONSTER_RESIST_CAP, REFLECT_SOURCE} from '../engine/runner';
 import {canEquipInSlot, canHire, chooseStarter, equip, equipTrophy, itemLevelRequirement, levelForPower, retireAdventurer, getActiveModifiers, getQuestProgress, hireApplicant, isQuestCleared, isItemEquipped, isModifierUnlocked, isQuestUnlocked, modifierUnlockText, buySlot, expandGuild, nextExpansion, nextSlot, sellItem, setActiveModifiers, unequip} from '../engine/state';
 import {formatMod} from '../engine/mods';
 import {expansions, slotUnlocks, trackNames, unlockFame, type SlotTrack} from '../data/milestones';
@@ -25,9 +25,9 @@ import {BENCH_PRICE, buyBench, buyShopItem, hasBench, refreshShop, restockSold, 
 import {APPLICANT_SLOTS, THIRD_APPLICANT_EXPANSION, applicantSlotFame, applicantSlots, ambitionHint, ambitionProgress, ambitionText, ambitionTierNames, applicantTierOdds, ensureApplicants, guildTier, TIER_FAME, tierStartFame, refreshApplicants, refreshCost, RETIRE_MULTIPLIER, retireFame} from '../engine/ambitions';
 import {contractHolder, contractRewardText, contractText, dropContract, ensureGuildContracts, ensurePersonalContract, findContract, grantedModifiers, guildRefreshCost, personalRefreshCost, refreshGuildContract, refreshPersonalContract, takeContract} from '../engine/contracts';
 import type {Ambition, Applicant, Contract, HeroPassive} from '../engine/types';
-import {bonusText as rareBonusText, passives as passiveDefs, type BonusKey} from '../data/passives';
+import {bloodPactBonus, bonusText as rareBonusText, passiveLevel, passives as passiveDefs, type BonusKey} from '../data/passives';
 import {buyOffer, HOLD_BASE, holdCost, holdOffer, offerPrice, PEDDLER_UNLOCK, peddlerHere, RARE_FOUND, releaseOffer, VISIT_GAP, VISIT_SECONDS} from '../engine/peddler';
-import {REFLECT_SHARE, ruleInfo} from '../engine/rules';
+import {corrosionFactor, REFLECT_SHARE, ruleInfo} from '../engine/rules';
 import {PORTAL_SECONDS, portalSecondsLeft} from '../engine/portal';
 import {itemMaterials, nextSalvageLevel, SALVAGE_EXPANSION, SALVAGE_MAX, SALVAGE_TIER_COST, salvageBlocked, salvageCost, salvageItem, salvageLevel, upgradeSalvage} from '../engine/salvage';
 
@@ -77,6 +77,9 @@ export interface UiState {
     shopDetail?: number | null
     // Bench: hide crafted items and base materials above the selected hero's level.
     hideTooHigh?: boolean
+    // Dev option: no item icons in the crafted items and equip lists, with larger text instead.
+    hideItemIcons?: boolean
+    craftedCollapsed?: boolean
     // Dev menu stat explorer filters.
     statExplorer?: StatExplorerState
     // Quest panel mode per quest: the normal quest or its endless variant.
@@ -92,7 +95,7 @@ export interface Ctx {
     ui: UiState
     // Re-renders the open panel and map after an action.
     refresh(): void
-    toast(message: string): void
+    toast(message: string | Node, ms?: number): void
 }
 
 const tierNames: Record<Tier, string> = {C: 'Common', U: 'Uncommon', R: 'Rare', M: 'Mythic'};
@@ -127,14 +130,28 @@ export function recipeButton(ctx: Ctx, item: CraftedItem): HTMLElement | null {
     const fill = recipeFill(state, item);
     const names = (keys: string[]) => keys.map(k => requireMaterial(k).name).join(', ');
     const status = !fill.base.length ? 'none' : fill.missing.length ? 'partial' : 'full';
+    // The missing materials as links to their detail cards, so the toast shows where to find them.
+    const missingToast = (lead: string, keys: string[]) => {
+        const counts = new Map<string, number>();
+        for (const k of keys) counts.set(k, (counts.get(k) ?? 0) + 1);
+        const parts: (Node | string)[] = [lead];
+        [...counts].forEach(([k, n], i) => {
+            if (i) parts.push(', ');
+            parts.push(materialLink(ctx, k));
+            if (n > 1) parts.push(` ×${n}`);
+        });
+        ctx.toast(h('span', null, ...parts), 7000);
+    };
     return h('button', {
         class: 'btn small recipe ' + status,
-        disabled: status === 'none',
+        // With none of its base materials it stays red, and a tap lists them instead of opening the bench.
+        'aria-disabled': status === 'none' ? 'true' : undefined,
         title: status === 'none' ? `None of its base materials in stock (${names(item.base)})`
             : status === 'partial' ? `Put the recipe on the bench. Missing: ${names(fill.missing)}`
             : 'Put the recipe on the bench: every material is in stock',
         onclick: (ev: MouseEvent) => {
             ev.stopPropagation();
+            if (status === 'none') { missingToast('None in stock: ', item.base); return; }
             ui.bench = {itemType: item.itemType, base: fill.base, decorations: fill.decorations};
             ui.shopOpen = false;
             ui.benchOpen = true;
@@ -143,7 +160,7 @@ export function recipeButton(ctx: Ctx, item: CraftedItem): HTMLElement | null {
             ui.materialDetail = null;
             // On narrow screens the bench takes the whole view, so the panel it came from closes.
             if (matchMedia('(max-width: 760px)').matches) ui.panel = null;
-            if (fill.missing.length) ctx.toast(`Missing ${names(fill.missing)}`);
+            if (fill.missing.length) missingToast('Missing ', fill.missing);
             ctx.refresh();
         },
     }, 'Recraft');
@@ -311,6 +328,8 @@ function hpXpBars(state: GameState, adventurer: Adventurer): HTMLElement {
     const levelStart = totalXpForLevel(adventurer.level);
     const levelEnd = totalXpForLevel(adventurer.level + 1);
     const xpFraction = (adventurer.xp - levelStart) / (levelEnd - levelStart);
+    // Max ward as the fight uses it: Corrosion lowers it mid-run.
+    const wardMax = fightStats(state, adventurer).maxWard;
     return h('div', null,
         h('div', {class: 'row small'},
             h('span', {style: 'width:24px'}, 'HP'),
@@ -319,8 +338,8 @@ function hpXpBars(state: GameState, adventurer: Adventurer): HTMLElement {
         ),
         stats.maxWard > 0 ? h('div', {class: 'row small', style: 'margin-top:4px'},
             h('span', {style: 'width:24px', title: 'Ward absorbs damage before HP and refills at the start of each encounter'}, 'Ward'),
-            h('div', {class: 'bar wide ward grow'}, h('span', {style: `width:${100 * Math.max(0, Math.min(stats.maxWard, adventurer.ward ?? stats.maxWard)) / stats.maxWard}%`})),
-            h('span', {class: 'num'}, `${Math.ceil(Math.max(0, adventurer.activity.kind === 'fighting' ? adventurer.ward ?? 0 : stats.maxWard))}/${stats.maxWard}`),
+            h('div', {class: 'bar wide ward grow'}, h('span', {style: `width:${100 * Math.max(0, Math.min(wardMax, adventurer.ward ?? wardMax)) / Math.max(1e-9, wardMax)}%`})),
+            h('span', {class: 'num'}, `${Math.ceil(Math.max(0, adventurer.activity.kind === 'fighting' ? adventurer.ward ?? 0 : wardMax))}/${Math.round(wardMax)}`),
         ) : null,
         h('div', {class: 'row small', style: 'margin-top:4px'},
             h('span', {style: 'width:24px'}, 'XP'),
@@ -379,7 +398,21 @@ function adventurerPanel(ctx: Ctx, adventurer: Adventurer): HTMLElement {
                 return [armorRow, evasionRow];
             })(),
             statRow('Block', pct(stats.blockChance)),
-            ...elements.map(e => statRow(`${e[0].toUpperCase()}${e.slice(1)} res`, pct(stats.resist[e]))),
+            // Past the cap, the uncapped total follows in brackets: 75% (110%).
+            ...elements.map(e => {
+                const total = stats.resistTotal?.[e] ?? stats.resist[e];
+                const over = total > stats.resist[e] + 1e-9;
+                const row = statRow(`${e[0].toUpperCase()}${e.slice(1)} res`, over ? `${pct(stats.resist[e])} (${pct(total)})` : pct(stats.resist[e]));
+                if (over) row.title = `${pct(total)} ${e} resistance in total, capped at ${pct(RESIST_CAP)}.`;
+                return row;
+            }),
+            // These are the stats before Corrosion; mid-run its stacks scale them down.
+            (adventurer.run?.corrosion ?? 0) > 0 && adventurer.activity.kind === 'fighting' ? (() => {
+                const row = statRow(`Corrosion ${adventurer.run!.corrosion}`, `× ${fmt(corrosionFactor(adventurer.run!.corrosion!), 2)} this run`);
+                row.classList.add('wide', 'bad');
+                row.title = 'Corrosion stacks scale evasion, armor, max ward, block chance and resistances above by this factor for the rest of the run.';
+                return row;
+            })() : null,
         ),
         h('div', {class: 'statgroup'}, 'Recovery'),
         h('div', {class: 'statgrid small'},
@@ -387,6 +420,13 @@ function adventurerPanel(ctx: Ctx, adventurer: Adventurer): HTMLElement {
             statRow('Leech', pct(stats.lifeLeech)),
             statRow('Life on hit', fmt(stats.lifeOnHit, 1)),
             statRow('Full rest', `${fmt(15 / restSpeed(stats.maxHealth, stats.lifeRegen, adventurer.level), 1)}s`),
+            ...(() => {
+                const level = passiveLevel(adventurer, 'bloodPact', classPassive);
+                if (!level) return [];
+                const row = statRow('Blood pact damage', `+${fmt(100 * bloodPactBonus(level, stats.lifeRegen))}%`);
+                row.title = `From ${fmt(stats.lifeRegen, 1)} HP regenerated per second. Leech healing over time adds to it in a fight.`;
+                return [row];
+            })(),
         ),
         h('div', {class: 'statgroup'}, 'Attributes'),
         h('div', {class: 'statgrid small'},
@@ -1088,7 +1128,7 @@ function slotChooser(ctx: Ctx, adventurer: Adventurer, slot: SlotKey): HTMLEleme
             options.length ? options.map(option => {
                 const crafted = option.ref.kind === 'crafted' ? state.craftedItems.find(c => c.id === (option.ref as {id: string}).id) : undefined;
                 const pick = h('button', {
-                class: 'item' + (crafted ? ' grow' : ''),
+                class: 'item gearopt' + (crafted ? ' grow' : ''),
                 'data-guide': crafted && adventurer.level >= itemLevelRequirement(state, option.ref) ? 'equip' : undefined,
                 id: option.ref.kind === 'material' ? 'gearopt-' + option.ref.key : undefined,
                 disabled: adventurer.level < itemLevelRequirement(state, option.ref),
@@ -1099,7 +1139,7 @@ function slotChooser(ctx: Ctx, adventurer: Adventurer, slot: SlotKey): HTMLEleme
                     }
                     ctx.refresh();
                 },
-            }, h('span', {class: 'rowart'}, crafted ? itemArt(crafted.itemType, crafted.base) : option.ref.kind === 'material' ? materialIcon(option.ref.key, 'typeart') : null),
+            }, h('span', {class: 'rowart listart'}, crafted ? itemArt(crafted.itemType, crafted.base) : option.ref.kind === 'material' ? materialIcon(option.ref.key, 'typeart') : null),
             h('span', {class: 'grow'},
                 h('div', null, option.name, h('span', {class: 'muted small'}, ' · ' + option.note),
                     levelTag(itemLevelRequirement(state, option.ref), adventurer.level)),
@@ -1576,7 +1616,7 @@ function encounterDetail(ctx: Ctx, quest: QuestDef, selected: number, heroMods: 
                 `Level ${encounterLevel(quest, index)}`,
                 `difficulty ${fmt(encounterPower(quest, index), 2)}`,
                 `${lineup.length} monster${lineup.length > 1 ? 's' : ''}`,
-                hero && !quest.endless ? xpNote(hero.name, hero.level, questXpLevel(quest)) : '',
+                hero && !quest.endless ? xpNote(hero.name, hero.level, questXpLevel(quest), heroMods.length) : '',
             ].filter(Boolean).join(' · ')),
         ),
     );
@@ -1624,8 +1664,8 @@ function encounterDetail(ctx: Ctx, quest: QuestDef, selected: number, heroMods: 
     }
 }
 
-function xpNote(name: string, heroLevel: number, level: number): string {
-    const mult = xpMultiplier(heroLevel, level);
+function xpNote(name: string, heroLevel: number, level: number, modifierCount = 0): string {
+    const mult = xpMultiplier(heroLevel, level, modifierCount);
     return mult >= 1 ? '' : mult <= 0 ? `no XP for ${name} (level ${heroLevel})` : `${name} gets ${num(mult * 100)}% XP`;
 }
 
@@ -1759,6 +1799,9 @@ export function modifierPenaltyText(def: QuestModifierDef): string {
     for (const [element, share] of Object.entries(def.addedDamage ?? {})) {
         parts.push(`monsters add ${Math.round(share * 100)}% of their damage as ${element}`);
     }
+    for (const [element, value] of Object.entries(def.resist ?? {})) {
+        parts.push(`+${Math.round(value * 100)}% monster ${element} resistance (up to ${Math.round(MONSTER_RESIST_CAP * 100)}%)`);
+    }
     if (def.duplicate) {
         parts.push('every monster appears twice (so twice the gold and XP)');
     }
@@ -1825,12 +1868,12 @@ function modifiersSection(ctx: Ctx, quest: QuestDef, adventurer: Adventurer): HT
 
 // ---------------- Crafting bench ----------------
 
-// The bench's comparison, built with the bench. On wide screens it shows beside the bench,
-// where the material picker opens, and the picker covers it.
+// The bench's comparison, built with the bench. On wide screens it shows beside the bench, or
+// beside the material picker while that is open.
 let benchComparison: HTMLElement | null = null;
 export function renderBenchCompare(ctx: Ctx): HTMLElement | null {
     const {ui} = ctx;
-    if (!ui.benchOpen || ui.picker || !ui.compareBeside || !benchComparison) return null;
+    if (!ui.benchOpen || !ui.compareBeside || !benchComparison) return null;
     return h('section', {class: 'comparefloat', 'aria-label': 'Comparison with the selected hero'}, benchComparison);
 }
 
@@ -2001,20 +2044,23 @@ function benchPanel(ctx: Ctx): HTMLElement {
     const hiddenByLevel = byStats.length - shownItems.length;
     const crafted = h('div', null,
         h('div', {class: 'craftedhead'},
-            h('h3', null, `Crafted items (${shownItems.length})`),
-            equippedCount ? h('label', {class: 'toggle small'},
+            h('div', {class: 'craftedtitle'},
+                h('h3', null, `Crafted items (${shownItems.length})`),
+                h('button', {class: 'btn small', 'aria-expanded': ui.craftedCollapsed ? 'false' : 'true', title: ui.craftedCollapsed ? 'Show the crafted items list' : 'Hide the crafted items list', onclick: () => { ui.craftedCollapsed = !ui.craftedCollapsed; ctx.refresh(); }}, ui.craftedCollapsed ? '▸ Show' : '▾ Hide'),
+            ),
+            equippedCount && !ui.craftedCollapsed ? h('label', {class: 'toggle small'},
                 h('input', {type: 'checkbox', checked: !!ctx.ui.showEquipped, onchange: (e: Event) => { ctx.ui.showEquipped = (e.target as HTMLInputElement).checked; ctx.refresh(); }}),
                 ` Show equipped items (${equippedCount})`,
             ) : null,
         ),
-        shownItems.length ? h('div', {class: 'list'},
+        ui.craftedCollapsed ? null : shownItems.length ? h('div', {class: 'list'},
             ...[...shownItems].reverse().map(item => {
                 const wearer = isItemEquipped(state, item.id);
                 const salvaging = ctx.ui.salvaging?.itemId === item.id ? ctx.ui.salvaging : null;
                 // Equip buttons are gathered from the comparison lines and shown with the other actions below.
                 const equipFor: [SlotKey, HTMLElement][] = [];
                 return h('div', {class: 'craftedrow'}, h('div', {class: 'small craftedbody'},
-                    h('span', {class: 'rowart'}, itemArt(item.itemType, item.base)),
+                    h('span', {class: 'rowart listart'}, itemArt(item.itemType, item.base)),
                     h('div', {class: 'grow'},
                         h('div', null, item.name, ' ', h('span', {class: 'power'}, `P${Math.max(...item.base.map(k => requireMaterial(k).power))}`), h('span', {class: 'muted'}, ` · ${itemTypes[item.itemType].name}`)),
                         h('div', {class: 'mods'}, itemStatsText(getCraftedItemStats(item))),
@@ -2032,7 +2078,8 @@ function benchPanel(ctx: Ctx): HTMLElement {
                         }) : null,
                     ),
                     wearer
-                        ? h('div', {class: 'muted'}, `Worn by ${wearer.name}`)
+                        ? h('div', {class: 'itemactions bottom'}, h('span', {class: 'muted'}, `Worn by ${wearer.name}`),
+                            salvageLevel(state) ? h('button', {class: 'btn small' + (salvaging ? ' on' : ''), 'aria-expanded': salvaging ? 'true' : 'false', onclick: () => { ctx.ui.salvaging = salvaging ? null : {itemId: item.id, picks: defaultSalvagePicks(item.base, item.decorations)}; ctx.refresh(); }}, 'Salvage') : null)
                         : h('div', {class: 'itemactions bottom'},
                             ...equipFor.map(([slot, btn]) => { btn.textContent = equipFor.length > 1 ? `Equip ${slotNames[slot]}` : 'Equip'; return btn; }),
                             recipeButton(ctx, item),
@@ -2041,8 +2088,8 @@ function benchPanel(ctx: Ctx): HTMLElement {
                 ), salvaging ? salvageBox(ctx, item.id, salvaging) : null);
             }),
         ) : h('div', {class: 'muted small'}, hiddenByLevel ? `Every crafted item here is above ${hero!.name}'s level ${hero!.level}.` : hiddenByFilter ? `No crafted items with ${filterNames(filters)}.` : state.craftedItems.length ? 'Every crafted item is equipped.' : 'Nothing crafted yet.'),
-        hiddenByFilter && shownItems.length ? h('div', {class: 'muted small'}, `${hiddenByFilter} more hidden by the stat filters.`) : null,
-        hiddenByLevel && shownItems.length ? h('div', {class: 'muted small'}, `${hiddenByLevel} more above ${hero!.name}'s level hidden.`) : null,
+        hiddenByFilter && shownItems.length && !ui.craftedCollapsed ? h('div', {class: 'muted small'}, `${hiddenByFilter} more hidden by the stat filters.`) : null,
+        hiddenByLevel && shownItems.length && !ui.craftedCollapsed ? h('div', {class: 'muted small'}, `${hiddenByLevel} more above ${hero!.name}'s level hidden.`) : null,
     );
 
     const levelToggle = hero ? h('label', {class: 'toggle small'},
@@ -2114,8 +2161,10 @@ function salvageBox(ctx: Ctx, itemId: string, salvaging: {itemId: string, picks:
         else return;
         ctx.refresh();
     };
+    const wearer = isItemEquipped(state, itemId);
     return h('div', {class: 'salvagebox'},
         h('div', {class: 'muted small'}, `Recover up to ${level} material${level === 1 ? '' : 's'}. The item is destroyed and the rest are lost.`),
+        wearer ? h('div', {class: 'small bad'}, `${wearer.name} is wearing this. Salvaging takes it off.`) : null,
         h('div', {class: 'statchips'}, ...all.map((key, i) => {
             const m = requireMaterial(key);
             const on = picks.includes(i);
@@ -2150,11 +2199,43 @@ function salvagePanel(ctx: Ctx): HTMLElement {
             `${level ? 'Upgrade' : 'Build'} · ${next.gold} gold`),
     ) : h('div', {class: 'muted small'}, `Fully upgraded: recovers up to ${SALVAGE_MAX} materials per item.`);
     return shell(ctx, 'Salvage yard', level ? `Recovers ${level} material${level === 1 ? '' : 's'} per item` : 'Not built yet',
-        h('p', {class: 'muted small', style: 'margin:0'}, 'Take a crafted item apart to recover some of its materials. The item is destroyed and the materials you don\'t pick are lost. Salvage from the Crafted items list on the crafting bench.'),
+        h('p', {class: 'muted small', style: 'margin:0'}, 'Take a crafted item apart to recover some of its materials. The item is destroyed and the materials you don\'t pick are lost.'),
         h('p', {class: 'muted small', style: 'margin:0'}, `Price for one material, by its tier: ${tiers}. Picking several uses the strongest one's price, doubled for each extra material (×2, ×4, ×8).`),
         h('p', {class: 'muted small', style: 'margin:0'}, `Each guild expansion after Guild Expansion ${SALVAGE_EXPANSION} opens an upgrade for one more material, up to ${SALVAGE_MAX}.`),
         action,
-        level ? h('div', {class: 'row'}, h('button', {class: 'btn', onclick: () => { ctx.ui.benchOpen = true; ctx.refresh(); }}, 'Open the crafting bench')) : null,
+        level ? salvageList(ctx) : null,
+    );
+}
+
+// The guild's crafted items, newest first, each with Salvage. Shares the bench's "Show equipped
+// items" setting; worn items can be salvaged too (they come off first).
+function salvageList(ctx: Ctx): HTMLElement {
+    const {state, ui} = ctx;
+    const equippedCount = state.craftedItems.filter(item => isItemEquipped(state, item.id)).length;
+    const shown = ui.showEquipped ? state.craftedItems : state.craftedItems.filter(item => !isItemEquipped(state, item.id));
+    return h('div', null,
+        h('div', {class: 'craftedhead'},
+            h('h3', null, `Crafted items (${shown.length})`),
+            equippedCount ? h('label', {class: 'toggle small'},
+                h('input', {type: 'checkbox', checked: !!ui.showEquipped, onchange: (e: Event) => { ui.showEquipped = (e.target as HTMLInputElement).checked; ctx.refresh(); }}),
+                ` Show equipped items (${equippedCount})`,
+            ) : null,
+        ),
+        shown.length ? h('div', {class: 'list'}, ...[...shown].reverse().map(item => {
+            const wearer = isItemEquipped(state, item.id);
+            const salvaging = ui.salvaging?.itemId === item.id ? ui.salvaging : null;
+            return h('div', {class: 'craftedrow'}, h('div', {class: 'small craftedbody'},
+                h('span', {class: 'rowart listart'}, itemArt(item.itemType, item.base)),
+                h('div', {class: 'grow'},
+                    h('div', null, item.name, ' ', h('span', {class: 'power'}, `P${Math.max(...item.base.map(k => requireMaterial(k).power))}`), h('span', {class: 'muted'}, ` · ${itemTypes[item.itemType].name}`)),
+                    h('div', {class: 'mods'}, itemStatsText(getCraftedItemStats(item))),
+                    h('div', {class: 'mods'}, 'Made from ', ...madeFromList(ctx, item.base, item.decorations)),
+                    wearer ? h('div', {class: 'muted'}, `Worn by ${wearer.name}`) : null,
+                ),
+                h('div', {class: 'itemactions bottom'},
+                    h('button', {class: 'btn small' + (salvaging ? ' on' : ''), 'aria-expanded': salvaging ? 'true' : 'false', onclick: () => { ui.salvaging = salvaging ? null : {itemId: item.id, picks: defaultSalvagePicks(item.base, item.decorations)}; ctx.refresh(); }}, 'Salvage')),
+            ), salvaging ? salvageBox(ctx, item.id, salvaging) : null);
+        })) : h('div', {class: 'muted small'}, state.craftedItems.length ? 'Every crafted item is equipped.' : 'Nothing crafted yet.'),
     );
 }
 
@@ -2410,7 +2491,7 @@ export function renderPickerPanel(ctx: Ctx): HTMLElement | null {
             h('p', {class: 'muted small'}, picker.kind === 'decoration'
                 ? `Decorations add on top of the base caps; two-handed weapons get larger values. They can be at most ${DECORATION_TIER_LEAD} tiers above the strongest base material.`
                 : CAP_RULE + ' A core stat with no cap from any base is 0.'),
-            picker.kind === 'base' ? h('p', {class: 'muted small'}, `An item requires level 1 + 3 per power above 1 of its strongest base material. Without this slot it requires level ${baseLevel}.`) : null,
+            picker.kind === 'base' ? h('p', {class: 'muted small'}, `An item requires a level set by its strongest base material: 3 levels per power up to P5 (P5 is level 13), 4 per power to P10 (level 33), then 5 per power (P11 is level 38). Without this slot it requires level ${baseLevel}.`) : null,
         ),
     );
 }
@@ -2418,7 +2499,7 @@ export function renderPickerPanel(ctx: Ctx): HTMLElement | null {
 // ---------------- Guild ----------------
 
 // One applicant: name, class and tier, portrait and passives, ambitions. `action` is the hire button.
-function applicantCard(app: Applicant, action: HTMLElement, showAmbitions = true): HTMLElement {
+function applicantCard(app: Applicant, action: HTMLElement | null, showAmbitions = true): HTMLElement {
     const cls = classes[app.classKey];
     const fameIfAll = Math.round(app.ambitions.reduce((sum, a) => sum + a.fame, 0) * RETIRE_MULTIPLIER[3]);
     return h('div', {class: 'applicant'},
@@ -2443,14 +2524,22 @@ export function renderStarterPick(ctx: Ctx): HTMLElement | null {
             h('div', {class: 'panel-head'}, h('div', {class: 'grow'},
                 h('h2', null, 'Your first adventurer'),
                 h('div', {class: 'muted small'}, 'Pick one to found the guild. You can hire more later from the guild hall.'))),
-            h('div', {class: 'panel-body'}, h('div', {class: 'starterlist'}, ...state.starters.map(app => applicantCard(app, h('button', {
-                class: 'btn small primary',
-                onclick: () => {
+            // The whole card is the choice: click, tap, or Enter/Space when focused.
+            h('div', {class: 'panel-body'}, h('div', {class: 'starterlist'}, ...state.starters.map(app => {
+                const choose = () => {
                     const hero = chooseStarter(state, app.id);
                     if (hero) selectHero(ui, hero.id);
                     ctx.refresh();
-                },
-            }, `Choose ${app.name}`), false)))),
+                };
+                const card = applicantCard(app, null, false);
+                card.classList.add('startercard');
+                card.setAttribute('role', 'button');
+                card.setAttribute('tabindex', '0');
+                card.setAttribute('aria-label', `Choose ${app.name}, level ${app.level} ${classes[app.classKey].name}`);
+                card.addEventListener('click', choose);
+                card.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); } });
+                return card;
+            }))),
         ),
     );
 }
@@ -2659,7 +2748,8 @@ function trophySection(ctx: Ctx): HTMLElement {
     const picking = ui.trophyPick;
     const trophyUnlocks = slotUnlocks.filter(u => u.track === 'trophySlot');
     const nextTrophySlot = nextSlot(state, 'trophySlot');
-    const slotEls = Array.from({length: MAX_TROPHY_SLOTS}, (_, i) => {
+    // Unlocked slots, then just the next one: its Unlock button, or why it is still locked.
+    const slotEls = Array.from({length: Math.min(MAX_TROPHY_SLOTS, slots + 1)}, (_, i) => {
         if (i >= slots) {
             if (i === slots && i > 0 && nextTrophySlot && nextTrophySlot.needsGoldOnly) {
                 return h('button', {

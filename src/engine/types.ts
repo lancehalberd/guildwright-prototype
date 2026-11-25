@@ -93,6 +93,8 @@ export interface QuestModifierDef {
     monster: Partial<Record<MonsterModStat, ModValue>>
     // Share of the monster's base damage added on top as an element.
     addedDamage?: Partial<Record<Element, number>>
+    // Added to the monsters' resistances (capped at MONSTER_RESIST_CAP).
+    resist?: Partial<Record<Element, number>>
     // ...for a matching reward.
     bonuses: RewardBonuses
     // Each point adds this quest's fee step to the entry fee.

@@ -60,12 +60,13 @@ export const genericModifiers: QuestModifierDef[] = [
     },
 ];
 
-// One per element. A quest can offer one openly where it fits its threats (Burning ground on Ashen
+// One per element: monsters add that element to their hits and resist it 50% more. A quest can offer one openly where it fits its threats (Burning ground on Ashen
 // Peaks); everywhere else they appear only when a contract or ambition asks for them.
 const groundModifier = (key: string, name: string, element: 'fire' | 'cold' | 'lightning'): QuestModifierDef => ({
     key, name,
     monster: {},
     addedDamage: {[element]: 0.4},
+    resist: {[element]: 0.5},
     bonuses: {rarityUpgradeChance: 0.15},
     feeWeight: 1,
     unlock: {kind: 'clearWith', count: 1},

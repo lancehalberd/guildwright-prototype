@@ -62,11 +62,13 @@ const SECONDARY: Partial<Record<StatKey, [number, 'flat' | 'percent']>> = {
 };
 // Life leech: don't add new sources (on materials, decorations or anything else); use another stat.
 // Life on hit and life regen follow set curves: the top amount at each tier (a focused source) is the
-// table value, and a medium secondary is half of it. Life regen is twice life on hit through P10.
+// table value, and a medium secondary is half of it. Life regen is at least 4x life on hit at every
+// tier. Hand-set regen follows the same rule: a focused accessory at least 4x the tier's top life on
+// hit, decorations and paired accessories at least 2x (Hive Wax set to 20, the low end of that).
 // Flat ward on dodge and on block decorations use the life on hit values.
 // Life on hit climbs to its cap over all 15 tiers (it used to reach it at P10).
 export const LIFE_ON_HIT_TOP = [0, 0.5, 0.75, 1, 1.5, 2, 3, 5, 7, 11, 17, 24, 31, 40, 50, 60];
-export const LIFE_REGEN_TOP = [0, 1, 2, 3, 6, 10, 20, 40, 60, 90, 120, 140, 160, 180, 200, 220];
+export const LIFE_REGEN_TOP = [0, 2, 3, 4, 6, 10, 20, 40, 60, 90, 120, 140, 160, 180, 200, 220];
 const CURVED: Partial<Record<StatKey, number[]>> = {lifeOnHit: LIFE_ON_HIT_TOP, lifeRegen: LIFE_REGEN_TOP};
 function secondaryValue(stat: StatKey, power: number): number {
     const curve0 = CURVED[stat];
@@ -291,9 +293,9 @@ const list: MaterialDef[] = [
         description: 'Soft green moss that knits small wounds, even between fights.',
         base: {
             armor: craft(1, 'secondary', {evasion: 1}, {lifeRegen: 1}),
-            belt: accessory('paired', {maxHealth: 4, lifeRegen: 0.5}, 1),
+            belt: accessory('paired', {maxHealth: 4, lifeRegen: 1}, 1),
         },
-        decoration: {armor: {lifeRegen: 0.5}},
+        decoration: {armor: {lifeRegen: 1}},
     },
     {
         key: 'sinew', name: 'Sinew', prefix: 'Sinew', power: 1,
@@ -364,9 +366,9 @@ const list: MaterialDef[] = [
         description: 'Thick, green and still trying to heal whatever it touches.',
         base: {
             armor: craft(2, 'secondary', {armor: 1}, {lifeRegen: 0.6, maxHealth: 0.4}),
-            belt: accessory('paired', {str: 2, lifeRegen: 1}, 2),
+            belt: accessory('paired', {str: 2, lifeRegen: 1.5}, 2),
         },
-        decoration: {weapon: {healthAsFire: defenseAsDamage('healthAsFire', 2)}, armor: {lifeRegen: 1}, accessory: {lifeRegen: 1}},
+        decoration: {weapon: {healthAsFire: defenseAsDamage('healthAsFire', 2)}, armor: {lifeRegen: 1.5}, accessory: {lifeRegen: 1.5}},
     },
     // ---- Power 3: Quest 1 rares ----
     {
@@ -434,7 +436,7 @@ const list: MaterialDef[] = [
             bodyArmor: craft(4, 'balanced', {evasion: 1}, {maxHealth: 1}, {itemLabel: 'Trollhide Coat'}),
             belt: accessory('focused', {maxHealth: 30}, 3),
         },
-        decoration: {armor: {maxHealth: 12}, belt: {lifeRegen: 2}, accessory: {increasedMaxHealth: 0.05}},
+        decoration: {armor: {maxHealth: 12}, belt: {lifeRegen: 3}, accessory: {increasedMaxHealth: 0.05}},
     },
     {
         key: 'garnet', name: 'Garnet', prefix: 'Garnet', power: 4,
@@ -469,7 +471,7 @@ const list: MaterialDef[] = [
             helmet: craft(4, 'balanced', {armor: 1}, {lifeRegen: 1}),
             boots: craft(4, 'balanced', {armor: 1}, {lifeRegen: 1}),
         },
-        decoration: {weapon: {str: 2, lifeOnHit: 0.5}, helmet: {lifeRegen: 2}, boots: {lifeRegen: 2}, accessory: {str: 2, lifeRegen: 2}},
+        decoration: {weapon: {str: 2, lifeOnHit: 0.5}, helmet: {lifeRegen: 3}, boots: {lifeRegen: 3}, accessory: {str: 2, lifeRegen: 3}},
     },
     {
         key: 'ritualAsh', name: 'Ritual Ash', prefix: 'Ashen', power: 4,
@@ -755,7 +757,7 @@ const list: MaterialDef[] = [
             bodyArmor: craft(5, 'secondary', {armor: 1}, {fireResist: 1}, {itemLabel: 'Salamander Hauberk'}),
             accessory: accessory('paired', {fireResist: 0.15, maxHealth: 18}, 3),
         },
-        decoration: {armor: {fireResist: 0.06, lifeRegen: 2}, accessory: {fireResist: 0.06}},
+        decoration: {armor: {fireResist: 0.06, lifeRegen: 4}, accessory: {fireResist: 0.06}},
     },
     {
         key: 'rimecoal', name: 'Rimecoal', prefix: 'Rimecoal', power: 5,
@@ -767,7 +769,7 @@ const list: MaterialDef[] = [
             armor: craft(5, 'capMixed', {ward: 1, hpLostAsWard: 1}, {coldResist: 1}),
             accessory: accessory('paired', {coldDamage: [5, 10], int: 4}, 3),
         },
-        decoration: {weapon: {coldDamage: 5, physicalToCold: 0.25, chillChance: 0.06}, armor: {coldResist: 0.06, lifeRegen: 2}},
+        decoration: {weapon: {coldDamage: 5, physicalToCold: 0.25, chillChance: 0.06}, armor: {coldResist: 0.06, lifeRegen: 4}},
     },
     {
         key: 'cinderwool', name: 'Cinderwool', prefix: 'Cinderwool', power: 5,
@@ -776,7 +778,7 @@ const list: MaterialDef[] = [
             smallArmor: craft(5, 'balanced', {evasion: 1}, {lifeRegen: 1}),
             belt: accessory('paired', {maxHealth: 35, lifeRegen: 6}, 3),
         },
-        decoration: {armor: {lifeRegen: 4}, accessory: {lifeRegen: 3, fireResist: 0.03}},
+        decoration: {armor: {lifeRegen: 4}, accessory: {lifeRegen: 4, fireResist: 0.03}},
     },
     {
         key: 'wyrmScale', name: 'Wyrm Scale', prefix: 'Wyrmscale', power: 6,
@@ -937,7 +939,7 @@ const list: MaterialDef[] = [
             shield: craft(10, 'secondary', {blockChance: 1}, {maxHealth: 1}),
             armor: craft(10, 'secondary', {evasion: 1}, {maxHealth: 1}),
         },
-        decoration: {shield: {blockChance: 0.04}, accessory: {maxHealth: 20, lifeRegen: 2}},
+        decoration: {shield: {blockChance: 0.04}, accessory: {maxHealth: 20, lifeRegen: 20}},
     },
     {
         key: 'mantisScythe', name: 'Mantis Scythe', prefix: 'Mantis', power: 11,
@@ -968,7 +970,7 @@ const list: MaterialDef[] = [
         key: 'royalJelly', name: 'Royal Jelly', prefix: 'Royal', power: 12,
         description: 'What the hive feeds its queens. It makes the body quick and hard to wound.',
         base: {
-            accessory: accessory('paired', {maxHealth: 75, lifeRegenPercent: 0.02}, 5),
+            accessory: accessory('paired', {maxHealth: 50, lifeRegenPercent: 0.01}, 5),
         },
         decoration: {armor: {evasion: 14, maxHealth: 20}, accessory: {maxHealth: 40}},
     },
@@ -1117,7 +1119,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {lifeRegen: 84, str: 10}, 5),
             belt: craft(11, 'balanced', {armor: 1}, {lifeRegen: 1}, {attr: 'str'}),
         },
-        decoration: {armor: {lifeRegen: 36, armor: 5}, accessory: {armor: 12}},
+        decoration: {armor: {lifeRegen: 48, armor: 5}, accessory: {armor: 12}},
     },
     {
         key: 'slagGlass', name: 'Slag Glass', prefix: 'Slag', power: 11,
@@ -1143,7 +1145,7 @@ const list: MaterialDef[] = [
         base: {
             accessory: accessory('paired', {lifeRegen: 96, maxHealth: 70}, 5),
         },
-        decoration: {weapon: {healthAsFire: defenseAsDamage('healthAsFire', 12)}, armor: {lifeRegen: 64}, accessory: {lifeRegen: 48, fireResist: 0.04}},
+        decoration: {weapon: {healthAsFire: defenseAsDamage('healthAsFire', 12)}, armor: {lifeRegen: 64}, accessory: {lifeRegen: 62, fireResist: 0.04}},
     },
     {
         key: 'forgeheart', name: 'Forgeheart', prefix: 'Forgeheart', power: 13,
@@ -1151,7 +1153,7 @@ const list: MaterialDef[] = [
         base: {
             accessory: accessory('paired', {lifeRegen: 108, increasedArmor: 0.2}, 6),
         },
-        decoration: {armor: {lifeRegen: 72, increasedArmor: 0.05}, accessory: {lifeRegen: 72}},
+        decoration: {armor: {lifeRegen: 80, increasedArmor: 0.05}, accessory: {lifeRegen: 80}},
         equip: {itemType: 'amulet', name: 'Forgeheart Locket', stats: {lifeRegen: 200, increasedArmor: 0.2, fireResist: 0.2}},
     },
     // ---- Tier 5, Skyspire Aerie: Karma. Every blow struck is judged, so the fewest, biggest blows win. ----
