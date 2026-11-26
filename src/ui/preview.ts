@@ -3,7 +3,7 @@
 // each class's portrait and battle sprite for both looks.
 import {classes, monsters, questOrder, quests} from '../data/quests';
 import {monsterKit} from '../engine/abilities';
-import {h} from './dom';
+import {fontZoomFix, h} from './dom';
 import {CombatView} from './combatView';
 import {ATTACK_ANIMS, HIT_EFFECTS, type Side} from './attackFx';
 import {heroLook, portraitUrl, heroSpriteUrl, heroAttackUrl, heroWeaponSprites, type Look} from './portraits';
@@ -177,7 +177,7 @@ export function openPreview(parent: HTMLElement) {
         stage.classList.toggle('big', big);
         Object.assign(view.el.style, {left: `${Math.round((w - baseW * k) / 2) / k}px`, top: `${Math.max(0, Math.round((hgt - ARENA_H * k) / 2)) / k}px`, width: `${baseW}px`, zoom: String(k)});
         stage.style.setProperty('--k', String(k));
-        stage.dataset.k = String(k);
+        fontZoomFix(stage, view.el, k);
     };
 
     const drawClasses = () => {

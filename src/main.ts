@@ -10,7 +10,7 @@ import {clearSave, exportSave, importSave, loadGame, saveGame} from './engine/sa
 import {addMaterial, checkProgress, nextExpansion, createNewGame, getQuestProgress, isModifierUnlocked, isQuestCleared, isQuestUnlocked} from './engine/state';
 import {getCachedStats, invalidateStats, levelCap, totalXpForLevel} from './engine/stats';
 import type {Adventurer, GameState, QuestDef, Tier} from './engine/types';
-import {adoptHandlers, h, shortNumber, svg, type Listened} from './ui/dom';
+import {adoptHandlers, fontZoomFix, h, shortNumber, svg, type Listened} from './ui/dom';
 import {heroPortrait} from './ui/portraits';
 import {exportBuild} from './engine/buildExport';
 import {classIcon, materialIcon} from './ui/icons';
@@ -1326,8 +1326,9 @@ function placeBattle() {
     // Zoom lays the arena out at full size; its own left and top are zoomed too, so they divide by k.
     Object.assign(combatView.el.style, {left: `${left / k}px`, top: `${top / k}px`, width: `${baseW}px`, zoom: String(k)});
     battleEl.style.setProperty('--k', String(k));
-    battleEl.dataset.k = String(k);
+    fontZoomFix(battleEl, combatView.el, k);
 }
+
 
 // Every frame: feed the open run panel's combat view, and drop events for anyone else.
 function updateCombatView() {

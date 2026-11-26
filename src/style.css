@@ -1162,15 +1162,16 @@ button.trophy-slot:hover .tcase, button.trophy-slot:focus-visible .tcase { borde
         radial-gradient(ellipse 55% 38% at 50% 64%, color-mix(in srgb, var(--site, #7a6a58) 30%, var(--surface)), transparent 70%),
         radial-gradient(ellipse 90% 70% at 50% 45%, color-mix(in srgb, var(--surface) 55%, transparent), transparent);
 }
-/* The run panel's arena, scaled by a whole number from main.ts. Text sizes divide by it so they read at a normal size. */
+/* The run panel's arena, zoomed by a whole number from main.ts. Text sizes divide by it so they read at a normal size.
+   --fz (main.ts fontZoomFix) is 1 where zoom scales font sizes, and k in a browser that zooms boxes but not text. */
 .arena.big { border: none; border-radius: 0; background: none; transform-origin: 0 0; }
-.arena.big .fighter .fname { font-size: calc(15px / var(--k)); line-height: round(calc(19px / var(--k)), 1px); max-width: none; color: var(--ink); font-weight: 600; }
-.arena.big .arena-overlay { font-size: calc(20px / var(--k)); }
-.arena.big .floater { font-size: calc(22px / var(--k)); }
-.arena.big .floater.crit1 { font-size: calc(26px / var(--k)); }
-.arena.big .floater.crit2 { font-size: calc(31px / var(--k)); }
-.arena.big .floater.crit3 { font-size: calc(37px / var(--k)); }
-.arena.big .ailb { font-size: calc(12px / var(--k)); padding: calc(2px / var(--k)) calc(4px / var(--k)); border-radius: calc(3px / var(--k)); }
+.arena.big .fighter .fname { font-size: calc(15px / var(--k) * var(--fz, 1)); line-height: round(calc(19px / var(--k)), 1px); max-width: none; color: var(--ink); font-weight: 600; }
+.arena.big .arena-overlay { font-size: calc(20px / var(--k) * var(--fz, 1)); }
+.arena.big .floater { font-size: calc(22px / var(--k) * var(--fz, 1)); }
+.arena.big .floater.crit1 { font-size: calc(26px / var(--k) * var(--fz, 1)); }
+.arena.big .floater.crit2 { font-size: calc(31px / var(--k) * var(--fz, 1)); }
+.arena.big .floater.crit3 { font-size: calc(37px / var(--k) * var(--fz, 1)); }
+.arena.big .ailb { font-size: calc(12px / var(--k) * var(--fz, 1)); padding: calc(2px / var(--k)) calc(4px / var(--k)); border-radius: calc(3px / var(--k)); }
 .arena.big .ails { gap: calc(3px / var(--k)); }
 .arena .hpnum { display: none; }
 /* The full view's bars are taller, with their numbers (current / max) drawn over them. */
@@ -1180,15 +1181,15 @@ button.trophy-slot:hover .tcase, button.trophy-slot:focus-visible .tcase { borde
 .arena.big .fighter .bar.ward { height: round(calc(16px / var(--k)), 1px); }
 .arena.big .bar > .hpnum {
     background: none; height: auto; display: flex; align-items: center; justify-content: center; position: absolute; inset: 0;
-    font-family: var(--font-data); font-variant-numeric: tabular-nums; font-size: calc(12px / var(--k)); line-height: 1;
+    font-family: var(--font-data); font-variant-numeric: tabular-nums; font-size: calc(15px / var(--k) * var(--fz, 1)); line-height: 1;
     /* Center the digits themselves, not the font's line box (its ascent is taller than its descent). */
     text-box: trim-both cap alphabetic;
     color: #fff; white-space: nowrap; text-shadow: 0 0 calc(2px / var(--k)) #000, 0 calc(1px / var(--k)) 0 #000;
 }
-.arena.big .bar.ward > .hpnum { font-size: calc(11px / var(--k)); }
-.arena.big .monsters.many .fname { display: block; font-size: calc(12px / var(--k)); }
+.arena.big .bar.ward > .hpnum { font-size: calc(13px / var(--k) * var(--fz, 1)); }
+.arena.big .monsters.many .fname { display: block; font-size: calc(12px / var(--k) * var(--fz, 1)); }
 .arena.big .monsters.many .fighter .bar { height: round(calc(16px / var(--k)), 1px); }
-.arena.big .monsters.many .bar > .hpnum { font-size: calc(10px / var(--k)); }
+.arena.big .monsters.many .bar > .hpnum { font-size: calc(13px / var(--k) * var(--fz, 1)); }
 .battlelog {
     position: absolute; left: 12px; top: 12px; z-index: 4; margin: 0; padding: 8px 12px;
     list-style: none; display: flex; flex-direction: column; gap: 2px;
@@ -1352,16 +1353,16 @@ button.trophy-slot:hover .tcase, button.trophy-slot:focus-visible .tcase { borde
 .arena.big .arena-recover:not([hidden]) {
     display: flex; flex-direction: column; align-items: center; gap: calc(5px / var(--k));
     position: absolute; left: 22%; top: 40%; transform: translate(-50%, -50%); z-index: 302;
-    font-size: calc(12px / var(--k)); padding: calc(8px / var(--k)) calc(10px / var(--k)); border-radius: calc(8px / var(--k));
+    font-size: calc(12px / var(--k) * var(--fz, 1)); padding: calc(8px / var(--k)) calc(10px / var(--k)); border-radius: calc(8px / var(--k));
     background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid var(--line);
     white-space: nowrap; box-shadow: 0 calc(2px / var(--k)) calc(8px / var(--k)) var(--shadow);
 }
 .arena.big .arena-recover > .btn {
-    font-size: calc(14px / var(--k)); padding: calc(5px / var(--k)) calc(12px / var(--k)); border-radius: calc(6px / var(--k));
+    font-size: calc(14px / var(--k) * var(--fz, 1)); padding: calc(5px / var(--k)) calc(12px / var(--k)); border-radius: calc(6px / var(--k));
 }
 .arena-recover .ar-auto { display: flex; align-items: center; gap: calc(6px / var(--k)); color: var(--ink-soft); }
-.arena-recover .seg button { font-size: calc(12px / var(--k)); padding: calc(2px / var(--k)) calc(6px / var(--k)); }
-.arena-recover .ar-status { color: var(--ink-soft); font-size: calc(11px / var(--k)); }
+.arena-recover .seg button { font-size: calc(12px / var(--k) * var(--fz, 1)); padding: calc(2px / var(--k)) calc(6px / var(--k)); }
+.arena-recover .ar-status { color: var(--ink-soft); font-size: calc(11px / var(--k) * var(--fz, 1)); }
 /* Phones: the button and the budget only. */
 @media (max-width: 600px) { .arena-recover .ar-status { display: none; } .arena.big .arena-recover:not([hidden]) { left: 50%; } }
 /* The battle view strip's run details: a full-width row that scrolls when long. */
@@ -1721,12 +1722,3 @@ body.no-item-icons .craftedbody .mods, body.no-item-icons .gearopt .mods { font-
 .signature b { font-weight: 700; }
 .signature.sigtag { display: inline; font-size: inherit; font-weight: 600; margin: 0; }
 
-/* v336: bar numbers sized per scale in plain px, not calc(px / var(--k)), so they grow with the bar
-   in every browser's zoom (some didn't apply zoom to the calc() font size, leaving them tiny).
-   About 15px on a 19px bar at 2x and 3x. */
-.arena.big .bar > .hpnum { font-size: 14px; }
-.arena.big .bar.ward > .hpnum, .arena.big .monsters.many .bar > .hpnum { font-size: 12px; }
-[data-k="2"] .arena.big .bar > .hpnum { font-size: 7.5px; }
-[data-k="2"] .arena.big .bar.ward > .hpnum, [data-k="2"] .arena.big .monsters.many .bar > .hpnum { font-size: 6.5px; }
-[data-k="3"] .arena.big .bar > .hpnum { font-size: 5px; }
-[data-k="3"] .arena.big .bar.ward > .hpnum, [data-k="3"] .arena.big .monsters.many .bar > .hpnum { font-size: 4.5px; }

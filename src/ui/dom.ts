@@ -92,3 +92,15 @@ export function shortNumber(n: number): string {
     const s = x < 10 ? (Math.floor(x * 100) / 100).toFixed(2) : x < 100 ? (Math.floor(x * 10) / 10).toFixed(1) : String(Math.floor(x));
     return s + units[i];
 }
+
+// Some browsers zoom boxes but not font sizes, which left the battle text a k-th of its size. Measure a
+// 10px probe inside the zoomed arena and set --fz to make up the difference (1 where zoom works).
+export function fontZoomFix(host: HTMLElement, arena: HTMLElement, k: number) {
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;left:0;top:0;visibility:hidden;font-size:10px;line-height:1';
+    probe.textContent = '0';
+    arena.appendChild(probe);
+    const height = probe.getBoundingClientRect().height;
+    probe.remove();
+    host.style.setProperty('--fz', String(height > 0 ? Math.round(10 * k / height * 10) / 10 : 1));
+}
