@@ -1369,16 +1369,15 @@ function placeCompare() {
     const mapRect = map.getBoundingClientRect();
     const benchRect = benchEl.getBoundingClientRect();
     const top = preview ? preview.getBoundingClientRect().top - mapRect.top : 12;
-    // With the material picker open it moves right of the picker. It hides when it would cover
-    // the right-hand panel.
+    // With the material picker open it moves right of the picker. It floats over any right-hand
+    // panel it reaches, and only shifts left to stay inside the map. (It used to hide when it would
+    // cover that panel, but hidden it measured 0 wide, so at some widths it flickered on and off.)
     const leftEdge = (pickerEl?.isConnected ? pickerEl.getBoundingClientRect().right : benchRect.right) + 8;
-    const rightPanel = [panelEl, gearEl].filter(el => el?.isConnected).map(el => el!.getBoundingClientRect().left);
-    const limit = Math.min(mapRect.right, ...rightPanel) - 8;
-    compareEl.hidden = leftEdge + compareEl.offsetWidth > limit;
+    const left = Math.max(mapRect.left + 8, Math.min(leftEdge, mapRect.right - compareEl.offsetWidth - 8));
     const height = compareEl.offsetHeight;
     // Stay on screen: never above the map's top or past its bottom.
     const clamped = Math.max(8, Math.min(top, mapRect.height - height - 8));
-    compareEl.style.left = `${leftEdge - mapRect.left}px`;
+    compareEl.style.left = `${left - mapRect.left}px`;
     compareEl.style.top = `${clamped}px`;
 }
 
