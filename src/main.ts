@@ -488,7 +488,8 @@ function fitHeroBar() {
     const hudGap = parseFloat(hs.columnGap) || 0;
     const room = hud.clientWidth - (parseFloat(hs.paddingLeft) || 0) - (parseFloat(hs.paddingRight) || 0)
         - others.reduce((sum, el) => sum + el.offsetWidth, 0) - hudGap * others.length;
-    hud.classList.toggle('heroes-below', needed > room);
+    // A few px of slack for rounding: offsetWidth rounds, and a card a fraction too wide would overflow.
+    hud.classList.toggle('heroes-below', needed > room - 4);
 }
 new ResizeObserver(() => fitHeroBar()).observe(hud);
 // Hero cards sit in one row that scrolls sideways when they don't fit. Touch scrolls natively; a

@@ -1734,4 +1734,8 @@ body.no-item-icons .craftedbody .mods, body.no-item-icons .gearopt .mods { font-
     .hud.heroes-below > .hud-heroes > .herocard { flex: none; }
     .hud.heroes-below > .seg { margin-left: auto; }
     .hud.heroes-below { min-width: 0; }
+    /* Inline, the cards keep their natural width in one row and never wrap: shrunk cards measured
+       narrower than they are, so fitHeroBar kept them inline in a range where they stacked (v341). */
+    .hud-heroes { flex-wrap: nowrap; }
+    .hud-heroes > .herocard { flex: none; }
 }
