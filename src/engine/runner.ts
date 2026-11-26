@@ -1,20 +1,22 @@
-import {bloodPactBonus, passiveLevel, type PassiveKey} from '../data/passives';
+import {challengeModifier, TRIAL_STEP, trialKey, VOID_KEY} from '../data/modifiers';
+import {trophyTotal} from '../data/trophies';
+import {bloodPactBonus, cursePremium, CLEAVE_SHARE, COUNTER_DAMAGE, EXPLOIT_PER_AILMENT, FURY_PER_MISSING, HEX_PER_SECOND, passiveLevel, RAMPAGE_PER_10, RIPOSTE_CRIT, SIPHON_RESTORE, SPELLWARD_HEAL, type PassiveKey} from '../data/passives';
 import {isPremium, PREMIUM_CHANCE, premiumKey, requireMaterial} from '../data/materials';
 import {kitHit, monsterKit, nextAbility, type KitEntry} from './abilities';
-import {campaignScale, classPassive, encounterLevel, encounterPower, questXpLevel, ENDLESS_PATTERN, xpMultiplier, EVASION_GROWTH, ACCURACY_GROWTH, monsterBaseline, monsters, questOrder, quests} from '../data/quests';
+import {campaignScale, classPassive, encounterLevel, encounterPower, questXpLevel, ENDLESS_PATTERN, xpMultiplier, EVASION_GROWTH, ACCURACY_GROWTH, monsterBaseline, monsters, questOrder, quests, endlessKey, questTier} from '../data/quests';
 import {trophyGoldXp} from '../data/trophies';
 import {addLog, addMaterial, getActiveModifiers, getQuestProgress, isQuestUnlocked} from './state';
 import {bossAmbitionFor, records} from './ambitions';
 import {findContract, rollGuildContract, rollPersonalContract} from './contracts';
 import {applyMods} from './mods';
 import {ailmentSeconds, BLEED_SECONDS, MIN_DOT_DPS, BLIND_CAP, blindFactor, tickBleed, BURN_SECONDS, CHILL_CAP, SHOCK_CAP, SNARE_CAP, WEAKEN_CAP, weakenFactor, GALE_CAP, SUNDER_CAP, galeFactor, sunderFactor, inflict, shockFactor, slowFactor, tickAilments, type AilmentBonus} from './ailments';
-import {armorReduce, exposedEvasion, getCachedStats, hitChance, invalidateStats, levelCap, mitigateByType, mitigateDamage, rollCritLevels, rollHits, totalXpForLevel} from './stats';
+import {armorReduce, exposedEvasion, getCachedStats, hitChance, invalidateStats, levelCap, mitigateByType, mitigateDamage, penetrate, rollCritLevels, rollHits, totalXpForLevel} from './stats';
 import {activeRules, corrode, corrosionFactor, corrosionStackChance, KARMA_DPS, REFLECT_SHARE} from './rules';
 // The takenBy key for reflected damage (monster keys never start with a colon).
 export const REFLECT_SOURCE = ':reflect';
 import {levelUpRestock} from './shop';
 import {isPortalQuest, openPortal, PORTAL_SECONDS} from './portal';
-import type {AbilityAilment, AbilityEffect, Adventurer, DamageMap, DamageType, Element, GameState, MonsterModStat, MonsterState, PoolEntry, QuestDef, QuestModifierDef, RewardBonuses, RunRecord, RunStats, Tier} from './types';
+import type {AbilityAilment, AbilityEffect, Adventurer, DamageMap, DamageType, Element, GameState, MonsterModStat, MonsterState, PoolEntry, QuestDef, QuestModifierDef, RewardBonuses, RunRecord, RunStats, StatKey, Tier} from './types';
 
 // Combat runs in fixed ticks; rendering runs on its own loop.
 export const TICK_SECONDS = 1 / 60;
@@ -90,6 +92,8 @@ function startRun(state: GameState, adventurer: Adventurer) {
         adventurer.previousRun = {questKey: adventurer.run.questKey, number: adventurer.run.number, outcome: runOutcome(adventurer.run)};
     }
     adventurer.run = {questKey: quest.key, number: previous + 1, cleared: -1, stopAt: getStopAt(adventurer, quest.key), loot: {}, gold: 0, xp: 0, fee, modifiers};
+    const challenge = challengeKeys(state, adventurer, quest);
+    if (challenge.length) adventurer.run.challenge = challenge;
     // A taken contract for this quest rides along with the run.
     const contract = findContract(state, adventurer.activeContract, adventurer);
     if (contract?.questKey === quest.key && adventurer.activeContract) {
@@ -283,7 +287,33 @@ function monsterResist(own: Partial<Record<Element, number>> | undefined, mods: 
 }
 
 export function getModifierDefs(quest: QuestDef, keys: string[]): QuestModifierDef[] {
-    return keys.map(k => quest.modifiers.find(m => m.key === k)).filter((m): m is QuestModifierDef => !!m);
+    return keys.map(k => quest.modifiers.find(m => m.key === k) ?? challengeModifier(k)).filter((m): m is QuestModifierDef => !!m);
+}
+
+// A run's modifiers plus its challenges (Endless trial, Void), for monster stats and rewards. The
+// challenges never count as modifiers (trophy tiers, XP, contracts).
+export function fightKeys(run: RunRecord | undefined): string[] {
+    return [...(run?.modifiers ?? []), ...(run?.challenge ?? [])];
+}
+
+// Endless trial levels the guild has opened on a quest: one per 20 Endless encounters cleared there,
+// once its banner is earned.
+export function trialMax(state: GameState, questKey: string): number {
+    if ((state.trophies?.['endless-' + questKey] ?? -1) < 0) return 0;
+    return Math.floor(((state.questProgress[endlessKey(questKey)]?.bestEncounter ?? -1) + 1) / TRIAL_STEP);
+}
+export function trialLevel(state: GameState, hero: Adventurer | undefined, questKey: string): number {
+    return Math.max(0, Math.min(trialMax(state, questKey), hero?.trials?.[questKey] ?? 0));
+}
+// The challenges a run on this quest takes on: the hero's Endless trial level, and the Void while the
+// Empty Vessel's stone is in a trophy slot and covers this quest's campaign tier.
+export function challengeKeys(state: GameState, hero: Adventurer | undefined, quest: QuestDef): string[] {
+    if (quest.endless) return [];
+    const out: string[] = [];
+    const trial = trialLevel(state, hero, quest.key);
+    if (trial > 0) out.push(trialKey(trial));
+    if (questTier(quest.key) < trophyTotal(state, 'voidTier')) out.push(VOID_KEY);
+    return out;
 }
 
 // Sums the bonuses from every source. Only quest modifiers for now; guild, trophy and gear bonuses
@@ -295,6 +325,7 @@ export function getRewardBonuses(quest: QuestDef, modifierKeys: string[]): Rewar
         total.rarityUpgradeChance! += m.bonuses.rarityUpgradeChance ?? 0;
         total.bonusRareChance! += m.bonuses.bonusRareChance ?? 0;
         total.goldXpMultiplier! *= m.bonuses.goldXpMultiplier ?? 1;
+        total.premiumChance = (total.premiumChance ?? 0) + (m.bonuses.premiumChance ?? 0);
     }
     return total;
 }
@@ -335,7 +366,7 @@ function startEncounter(state: GameState, adventurer: Adventurer, quest: QuestDe
     if (boss && boss === quest.boss?.monster) progress.bossFought = true;
     const lineup = boss ? [boss] : encounterLineup(quest, index, adventurer.run?.modifiers);
     const monsterStates: MonsterState[] = lineup.map(key => {
-        const stats = getMonsterStats(quest, index, key, adventurer.run?.modifiers);
+        const stats = getMonsterStats(quest, index, key, fightKeys(adventurer.run));
         // Each fighter's first attack comes after a random part of its usual cooldown, so who
         // strikes first varies and attacks don't line up.
         return {key, hp: stats.hp, maxHp: stats.hp, cooldown: encounterRng() / stats.attacksPerSecond};
@@ -413,7 +444,7 @@ export function getRecoverCost(state: GameState, adventurer: Adventurer): number
     // Adventurers recover at the guild hall, so the cost depends only on time left and level.
     // Scaling with level keeps paying to skip rests a real cost as characters grow.
     const stats = getCachedStats(state, adventurer);
-    const secondsLeft = adventurer.activity.remaining / restSpeed(stats.maxHealth, stats.lifeRegen, adventurer.level);
+    const secondsLeft = adventurer.activity.remaining / restSpeed(stats.maxHealth, stats.lifeRegen * (1 + (stats.gear.increasedRecovery ?? 0)), adventurer.level);
     return Math.max(1, Math.ceil(secondsLeft * 0.4 * adventurer.level));
 }
 
@@ -670,7 +701,7 @@ function winEncounter(state: GameState, adventurer: Adventurer, quest: QuestDef,
     } else if (boss) {
         winBoss(state, adventurer, quest);
     }
-    const bonuses = getRewardBonuses(quest, run?.modifiers ?? []);
+    const bonuses = getRewardBonuses(quest, fightKeys(run));
     // Rounded down, so far over-level heroes earn nothing here.
     const trophy = trophyGoldXp(state);
     const xp = Math.floor(4 * power * count * (bonuses.goldXpMultiplier ?? 1) * (1 + trophy.xp) * xpMultiplier(adventurer.level, questXpLevel(quest), run?.modifiers?.length ?? 0));
@@ -678,7 +709,10 @@ function winEncounter(state: GameState, adventurer: Adventurer, quest: QuestDef,
     state.gold += gold;
     // One drop, plus extras from bonuses. Each drop can be upgraded one rarity step.
     const drops: {material: string, amount: number, tier: Tier}[] = [];
-    const dropCount = 1 + rollCount(bonuses.extraRewardChance ?? 0, rng);
+    // Endless banners add extra reward chance everywhere.
+    const dropCount = 1 + rollCount((bonuses.extraRewardChance ?? 0) + trophyTotal(state, 'extraRewardChance'), rng);
+    // Premium chance: increased by challenges (Endless trial, Void) and the hero's curses.
+    const premiumChance = PREMIUM_CHANCE * (1 + (bonuses.premiumChance ?? 0) + cursePremium(adventurer));
     for (let d = 0; d < dropCount; d++) {
         let dropTier: Tier = tier;
         const next = upgradeTier[tier];
@@ -688,7 +722,7 @@ function winEncounter(state: GameState, adventurer: Adventurer, quest: QuestDef,
         const {entry, amount} = rollPool(quest.pools[dropTier], rng);
         // Each unit has a small chance to be the premium version.
         let premium = 0;
-        if (!requireMaterial(entry.material).keyItem) for (let i = 0; i < amount; i++) if (rng() < PREMIUM_CHANCE) premium++;
+        if (!requireMaterial(entry.material).keyItem) for (let i = 0; i < amount; i++) if (rng() < premiumChance) premium++;
         const parts: [string, number][] = [[entry.material, amount - premium], [premiumKey(entry.material), premium]];
         for (const [material, count] of parts) {
             if (count < 1) continue;
@@ -719,15 +753,6 @@ function winEncounter(state: GameState, adventurer: Adventurer, quest: QuestDef,
     }
     const last = quest.encounters.length - 1;
     if (index === last && !bonus && !boss) {
-        progress.fullClears++;
-        const modCount = run?.modifiers?.length ?? 0;
-        progress.bestModifiedClear = Math.max(progress.bestModifiedClear ?? -1, modCount);
-        const r = records(adventurer);
-        r.modClears[quest.key] = Math.max(r.modClears[quest.key] ?? 0, modCount);
-        if (ARMOR_SLOTS.every(slot => !adventurer.equipment[slot]) && !r.bareClears.includes(quest.key)) {
-            r.bareClears.push(quest.key);
-        }
-        completeContract(state, adventurer, quest);
         // An adventurer who dreams of this quest's boss meets it, if the right modifiers are on.
         const ambition = bossAmbitionFor(adventurer, quest.key);
         if (run && quest.boss && ambition && (ambition.mods ?? []).every(m => run.modifiers?.includes(m)) && !run.bossEncounter) {
@@ -739,18 +764,46 @@ function winEncounter(state: GameState, adventurer: Adventurer, quest: QuestDef,
             run.riteBoss = 'pending';
             addLog(state, quest.key, `${monsters[rite.boss].name} awaits ${adventurer.name}!`, 'info');
         }
-        const achievement = 'clear-' + quest.key;
-        if (!state.achievements.includes(achievement)) {
-            // The clear trophy grants the fame.
-            state.achievements.push(achievement);
-            addLog(state, quest.key, 'First clear!', 'info');
-        }
         // A chance at one more rare fight after the final encounter. It follows straight on (or after
         // a rest, with REST_BEFORE_EXTRA_FIGHT) instead of a new run starting.
         if (run && !run.bonusEncounter && rng() < (bonuses.bonusRareChance ?? 0)) {
             run.bonusEncounter = 'pending';
             addLog(state, quest.key, `A bonus rare encounter awaits${REST_BEFORE_EXTRA_FIGHT ? ' after resting' : ''}!`, 'info');
         }
+        // The clear counts once every encounter of this attempt is won, extra fights included.
+        if (run && extraFightsPending(run)) {
+            run.clearPending = true;
+        } else {
+            completeClear(state, adventurer, quest);
+        }
+    } else if ((bonus || boss) && run?.clearPending && !extraFightsPending(run)) {
+        delete run.clearPending;
+        completeClear(state, adventurer, quest);
+    }
+}
+
+function extraFightsPending(run: RunRecord): boolean {
+    return run.riteBoss === 'pending' || run.bossEncounter === 'pending' || run.bonusEncounter === 'pending';
+}
+
+// A full clear: the clear trophy's progress, records, and the contract it was run for.
+function completeClear(state: GameState, adventurer: Adventurer, quest: QuestDef) {
+    const progress = getQuestProgress(state, quest.key);
+    const run = adventurer.run?.questKey === quest.key ? adventurer.run : undefined;
+    progress.fullClears++;
+    const modCount = run?.modifiers?.length ?? 0;
+    progress.bestModifiedClear = Math.max(progress.bestModifiedClear ?? -1, modCount);
+    const r = records(adventurer);
+    r.modClears[quest.key] = Math.max(r.modClears[quest.key] ?? 0, modCount);
+    if (ARMOR_SLOTS.every(slot => !adventurer.equipment[slot]) && !r.bareClears.includes(quest.key)) {
+        r.bareClears.push(quest.key);
+    }
+    completeContract(state, adventurer, quest);
+    const achievement = 'clear-' + quest.key;
+    if (!state.achievements.includes(achievement)) {
+        // The clear trophy grants the fame.
+        state.achievements.push(achievement);
+        addLog(state, quest.key, 'First clear!', 'info');
     }
 }
 
@@ -824,8 +877,8 @@ export function shielded(m: MonsterState, fighting: MonsterState[]): boolean {
 }
 
 // Riposte's crit chance per attack dodged within its window.
-export const RIPOSTE_CRIT = 0.5;
-export const RIPOSTE_WINDOW = 2, RIPOSTE_WINDOW_ENHANCED = 3;
+export const RIPOSTE_WINDOW = 2;
+export const RAMPAGE_WINDOW = 4;
 
 function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rng) {
     const activity = adventurer.activity;
@@ -868,11 +921,16 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     const pl = (key: PassiveKey) => passiveLevel(adventurer, key, classPassive);
     const furyL = pl('fury'), followL = pl('followThrough'), siphonL = pl('siphonWard'), cleaveL = pl('cleave'), riposteL = pl('riposte'), spellL = pl('spellward');
     const counterL = pl('counterstrike'), exploitL = pl('exploit'), bloodL = pl('bloodPact'), rampageL = pl('rampage'), deadeyeL = pl('deadeye'), hexL = pl('hex');
+    // Each passive's effect scale: the numbers that "increased core passive effect" strengthens.
+    const sc = (key: PassiveKey) => stats.passiveScale[key] ?? 0;
     // Hex: monsters deal less and take more for each second of ailments on them.
-    const hexFactor = (m: MonsterState) => hexL ? (hexL >= 2 ? 0.06 : 0.04) * ailmentSeconds(m.ailments) : 0;
+    const hexFactor = (m: MonsterState) => hexL ? HEX_PER_SECOND * sc('hex') * ailmentSeconds(m.ailments) : 0;
+    // Trophy stats on the hero (data/trophies.ts).
+    const tg = (key: StatKey) => stats.gear[key] ?? 0;
+    const recovery = 1 + tg('increasedRecovery');
     activity.clock = (activity.clock ?? 0) + dt;
-    // Spellward: healing past full HP becomes ward, up to 2x (enhanced 3x) max ward.
-    const spellCap = spellL ? (spellL >= 2 ? 3 : 2) * stats.maxWard : 0;
+    // Spellward: healing past full HP becomes ward, up to twice max ward.
+    const spellCap = spellL ? 2 * stats.maxWard : 0;
     // Leech soft cap: life leeched in combat over the last second, against the hero's pool (max HP +
     // max ward). The first RECOVERY_BAND of the pool per second heals in full, the next band at half,
     // the next at a quarter, and so on, so leech heals no more than twice the band per second.
@@ -891,6 +949,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     };
     const healHero = (raw: number, leech = false): number => {
         if (lifeless || raw <= 0) return 0;
+        raw *= recovery;
         const amount = leech ? softCap(raw) : raw;
         const healed = heal(adventurer, stats.maxHealth, amount);
         let gained = 0;
@@ -906,12 +965,18 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     // Ward gains that stop at max ward, without cutting ward a Spellward hero holds above it.
     const gainWard = (amount: number) => {
         if (lifeless || amount <= 0) return;
+        amount *= recovery;
         const before = adventurer.ward ?? 0;
         adventurer.ward = Math.max(before, Math.min(stats.maxWard, before + amount));
         if (rs) rs.wardGained += adventurer.ward - before;
     };
     const regen = healHero(stats.lifeRegen * dt);
     if (rs) rs.healed.regen += regen;
+    // Spellward: regenerate a share of current ward as HP each second.
+    if (spellL && (adventurer.ward ?? 0) > 0) {
+        const fromWard = healHero(SPELLWARD_HEAL * sc('spellward') * (adventurer.ward ?? 0) * dt);
+        if (rs) rs.healed.regen += fromWard;
+    }
     if (activity.ending !== undefined) {
         activity.ending -= dt;
         if (activity.ending <= 0) {
@@ -925,9 +990,16 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     }
     // Chill and Shock compare a hit with an average monster's HP at this encounter's level.
     const threshold = monsterBaseline.hp * encounterPower(quest, activity.encounterIndex) * (quest.monsterScale ?? 1);
+    // Exploit: burns last twice as long, and chill and shock build to 75%. Increased limits raise both.
+    const limits = 1 + tg('increasedAilmentLimits');
     const ailmentBonus: AilmentBonus = {chance: {burn: stats.gear.igniteChance ?? 0, chill: stats.gear.chillChance ?? 0, shock: stats.gear.shockChance ?? 0}, effect: stats.gear.ailmentEffect ?? 0,
-        // Exploit: burns last twice as long, and chill and shock build to 75%.
-        ...(exploitL ? {burnSeconds: 2 * BURN_SECONDS, cap: 0.75} : {})};
+        chanceMore: tg('increasedAilmentChance'),
+        burnSeconds: (exploitL ? 2 : 1) * BURN_SECONDS * limits, cap: (exploitL ? 0.75 : CHILL_CAP) * limits};
+    // Ailments monsters put on the hero: some avoided outright, the rest weaker.
+    const heroAilmentBonus: AilmentBonus = {effect: -tg('reducedAilmentEffectTaken')};
+    const avoidsAilment = () => tg('avoidAilmentChance') > 0 && rng() < tg('avoidAilmentChance');
+    // Damage taken over time (burns, bleeds, Karma): less damage taken and reduced damage over time.
+    const dotTaken = (1 - tg('lessDamageTaken')) * (1 - tg('reducedDamageOverTimeTaken'));
     const defeat = (by: string) => {
         const progress = getQuestProgress(state, quest.key);
         progress.bestEncounter = Math.max(progress.bestEncounter, activity.encounterIndex - 1);
@@ -970,7 +1042,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             let index = adds.findIndex((_, j) => !activity.monsters.some(o => o.slot === base + j) && !spawned.some(o => o.slot === base + j));
             if (index < 0) index = adds.length;
             adds[index] = summon.monster;
-            const st = getMonsterStats(quest, activity.encounterIndex, summon.monster, run?.modifiers);
+            const st = getMonsterStats(quest, activity.encounterIndex, summon.monster, fightKeys(run));
             spawned.push({key: summon.monster, slot: base + index, hp: st.hp * (summon.hp ?? 1), maxHp: st.hp * (summon.hp ?? 1), cooldown: (0.5 + 0.5 * rng()) / st.attacksPerSecond});
         }
         activity.monsters.unshift(...spawned);
@@ -990,14 +1062,14 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             let index = adds.findIndex((_, j) => !activity.monsters.some(o => o.slot === base + j) && !spawned.some(o => o.slot === base + j));
             if (index < 0) index = adds.length;
             adds[index] = shatter.shard;
-            const st = getMonsterStats(quest, activity.encounterIndex, shatter.shard, run?.modifiers);
+            const st = getMonsterStats(quest, activity.encounterIndex, shatter.shard, fightKeys(run));
             spawned.push({key: shatter.shard, slot: base + index, hp: st.hp, maxHp: st.hp, cooldown: (0.5 + 0.5 * rng()) / st.attacksPerSecond});
         }
         activity.monsters.unshift(...spawned);
         addLog(state, quest.key, `${monsters[m.key].name} shatters: ${shatter.count} ${monsters[shatter.shard].name}s rise to guard him.`, 'info');
     };
     // Burning on the hero: ward soaks it first, like any damage.
-    const heroBurn = tickAilments(activity.heroAilments, dt) * shockFactor(activity.heroAilments);
+    const heroBurn = tickAilments(activity.heroAilments, dt) * shockFactor(activity.heroAilments) * dotTaken * (1 - tg('lessElementalDamageTaken'));
     if (heroBurn > 0) {
         const absorbed = Math.min(adventurer.ward ?? 0, heroBurn);
         adventurer.ward = (adventurer.ward ?? 0) - absorbed;
@@ -1014,7 +1086,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         }
     }
     // Bleeding on the hero: armor already applied when it started; ward soaks it first.
-    const heroBleed = tickBleed(activity.heroAilments, dt) * shockFactor(activity.heroAilments);
+    const heroBleed = tickBleed(activity.heroAilments, dt) * shockFactor(activity.heroAilments) * dotTaken;
     if (heroBleed > 0) {
         const absorbed = Math.min(adventurer.ward ?? 0, heroBleed);
         adventurer.ward = (adventurer.ward ?? 0) - absorbed;
@@ -1034,7 +1106,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     // second's damage were one hit; ward soaks it first.
     if (run?.karma) {
         const perSecond = KARMA_DPS * run.karma;
-        const karma = armorReduce(perSecond, stats.armor) * dt;
+        const karma = armorReduce(perSecond, stats.armor) * dt * dotTaken;
         const absorbed = Math.min(adventurer.ward ?? 0, karma);
         adventurer.ward = (adventurer.ward ?? 0) - absorbed;
         adventurer.hp -= karma - absorbed;
@@ -1056,8 +1128,23 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         const refl = reflected ? {reflected: true} : {};
         // Sunder on the hero cuts their armor.
         const armor = stats.armor * sunderFactor(activity.heroAilments);
-        let taken = mitigateDamage(split, armor, stats.resist, rng) * shockFactor(activity.heroAilments);
+        // Dodge chance (Ninja's Shuriken): a separate roll on each hit that got past evasion. It doesn't
+        // end the attacker's chain, so the next hit still rolls.
+        if (!reflected && from && tg('dodgeChance') > 0 && rng() < tg('dodgeChance')) {
+            if (rs) rs.attacksDodged++;
+            if (riposteL) (activity.recentDodges ??= []).push(activity.clock ?? 0);
+            pushCombat({adventurerId: adventurer.id, side: 'hero', slot, kind: 'miss', hitIndex});
+            return true;
+        }
+        // Trophy reductions: less elemental damage, less damage, and reduced reflected damage.
+        const lessEle = 1 - tg('lessElementalDamageTaken');
         const takenByType = mitigateByType(split, armor, stats.resist);
+        for (const e of elementsOf(takenByType)) takenByType[e] = (takenByType[e] ?? 0) * lessEle;
+        const takenMore = shockFactor(activity.heroAilments) * (1 - tg('lessDamageTaken')) * (reflected ? 1 - tg('reducedReflectedDamageTaken') : 1);
+        for (const t of Object.keys(takenByType) as DamageType[]) takenByType[t] = (takenByType[t] ?? 0) * takenMore;
+        const sumTaken = Object.values(takenByType).reduce((a, b) => a + (b ?? 0), 0);
+        // A hit under 1 lands as 1 with its own chance, as mitigateDamage does.
+        let taken = sumTaken >= 1 ? sumTaken : rng() < sumTaken ? 1 : 0;
         if (rs) rs.incomingHits++;
         if (rng() < stats.blockChance) {
             if (rs) {
@@ -1087,13 +1174,14 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             }
         }
         // Monsters' elemental hits inflict ailments too, measured against the hero's max life.
-        if (from) inflict(activity.heroAilments ??= {}, takenByType, stats.maxHealth, rng);
-        if (rules.has('corrosion') && run && rng() < corrosionStackChance(run.corrosion ?? 0)) {
+        if (from && !avoidsAilment()) inflict(activity.heroAilments ??= {}, takenByType, stats.maxHealth, rng, heroAilmentBonus);
+        // Corrosion counts as an ailment for avoidance (Amber Reliquary's avoid ailment chance).
+        if (rules.has('corrosion') && run && rng() < corrosionStackChance(run.corrosion ?? 0) && !avoidsAilment()) {
             run.corrosion = (run.corrosion ?? 0) + 1;
             // Max ward drops with the stack, so ward held above the new cap goes with it (Spellward's
             // cap scales the same way).
             const newMax = getCachedStats(state, adventurer).maxWard * corrosionFactor(run.corrosion);
-            adventurer.ward = Math.min(adventurer.ward ?? 0, spellL ? (spellL >= 2 ? 3 : 2) * newMax : newMax);
+            adventurer.ward = Math.min(adventurer.ward ?? 0, spellL ? 2 * newMax : newMax);
         }
         if (rampageL && taken > 0) (activity.recentHits ??= []).push({at: activity.clock ?? 0, amount: taken});
         // Ward soaks damage of any type before HP.
@@ -1107,8 +1195,8 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         }
         // HP lost comes back partly as ward, up to max ward.
         if (taken > 0 && stats.hpLostAsWard > 0 && adventurer.hp > 0) gainWard(taken * stats.hpLostAsWard);
-        // Siphon ward: each hit that isn't blocked restores 5% of max ward (enhanced 10%) afterward.
-        if (siphonL && stats.maxWard > 0 && adventurer.hp > 0) gainWard((siphonL > 1 ? 0.075 : 0.05) * stats.maxWard);
+        // Siphon ward: each hit that isn't blocked restores a share of max ward afterward.
+        if (siphonL && stats.maxWard > 0 && adventurer.hp > 0) gainWard(SIPHON_RESTORE * sc('siphonWard') * stats.maxWard);
         pushCombat({adventurerId: adventurer.id, side: 'hero', slot, kind: 'hit', amount: taken, ward: absorbed, hitIndex, damageType: mainType(split), hpAfter: Math.max(0, adventurer.hp) / stats.maxHealth, wardAfter: (adventurer.ward ?? 0) / Math.max(1, stats.maxWard), pool: stats.maxHealth + stats.maxWard, ...refl});
         return adventurer.hp > 0;
     };
@@ -1132,17 +1220,15 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             if (rs) rs.kills++;
         }
     }
-    // Riposte: dodges count for 2 seconds (3 enhanced).
+    // Riposte: dodges count for 2 seconds.
     if (riposteL && activity.recentDodges?.length) {
-        const window = riposteL >= 2 ? RIPOSTE_WINDOW_ENHANCED : RIPOSTE_WINDOW;
-        activity.recentDodges = activity.recentDodges.filter(at => (activity.clock ?? 0) - at <= window);
+        activity.recentDodges = activity.recentDodges.filter(at => (activity.clock ?? 0) - at <= RIPOSTE_WINDOW);
     }
-    // Rampage: damage taken in the last few seconds raises damage and attack speed.
+    // Rampage: damage taken in the last 4 seconds raises damage and attack speed.
     if (rampageL) {
-        const window = rampageL >= 2 ? 6 : 4;
-        activity.recentHits = (activity.recentHits ?? []).filter(h => (activity.clock ?? 0) - h.at <= window);
+        activity.recentHits = (activity.recentHits ?? []).filter(h => (activity.clock ?? 0) - h.at <= RAMPAGE_WINDOW);
     }
-    const rampage = () => rampageL ? 1 + 0.01 * (activity.recentHits ?? []).reduce((sum, h) => sum + h.amount, 0) / 10 : 1;
+    const rampage = () => rampageL ? 1 + RAMPAGE_PER_10 * sc('rampage') * (activity.recentHits ?? []).reduce((sum, h) => sum + h.amount, 0) / 10 : 1;
     // Blood pact: leech heals over its second. While it flows it counts as regeneration.
     if (activity.leechPool?.length) {
         let flowing = 0;
@@ -1155,7 +1241,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     const bloodBonus = () => {
         if (!bloodL || lifeless) return 1;
         const perSecond = stats.lifeRegen + (activity.leechPool ?? []).reduce((sum, part) => sum + part.perSecond, 0);
-        return 1 + bloodPactBonus(bloodL, perSecond);
+        return 1 + bloodPactBonus(sc('bloodPact'), perSecond);
     };
     // One attack. A free one (Counterstrike) works like any other attack, swinging the next weapon,
     // using Riposte stacks and paying Blood pact's cost, but it doesn't add to the cooldown.
@@ -1166,19 +1252,17 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         const swingDamage = swing?.damage ?? stats.damage;
         if (stats.strikes) activity.swing = ((activity.swing ?? 0) + 1) % stats.strikes.length;
         if (!free) activity.cooldown += 1 / ((swing?.attacksPerSecond ?? stats.attacksPerSecond) * rampage());
-        // Riposte: +50% crit chance for each attack dodged in the last few seconds.
-        const critChance = stats.critChance + RIPOSTE_CRIT * (riposteL ? activity.recentDodges?.length ?? 0 : 0);
+        // Riposte: crit chance for each attack dodged in the last 2 seconds.
+        const critChance = stats.critChance + RIPOSTE_CRIT * sc('riposte') * (riposteL ? activity.recentDodges?.length ?? 0 : 0);
         const critBonus = stats.critBonus;
         // Blood pact: each attack costs 2% of current HP, which alone can never kill.
         if (bloodL) adventurer.hp -= 0.02 * Math.max(0, adventurer.hp);
-        let carried = false;
         // One attack can land several hits, all on the monster in front. A kill ends the chain,
         // except with Follow-through, where the remaining hits carry on to the next monster.
         const frontTarget = activity.monsters[0];
-        let hits = rollHits(stats.accuracy * blindFactor(activity.heroAilments), exposedEvasion(getMonsterStats(quest, activity.encounterIndex, frontTarget.key, adventurer.run?.modifiers).evasion * (1 + (frontTarget.evade?.amount ?? 0)), frontTarget.exposed), rng);
+        let hits = rollHits(stats.accuracy * blindFactor(activity.heroAilments), exposedEvasion(getMonsterStats(quest, activity.encounterIndex, frontTarget.key, fightKeys(adventurer.run)).evasion * (1 + (frontTarget.evade?.amount ?? 0)), frontTarget.exposed), rng);
         frontTarget.exposed = hits ? 0 : (frontTarget.exposed ?? 0) + 1;
-        // Deadeye: the hits land as one combined hit (enhanced: with one more hit).
-        if (deadeyeL >= 2) hits++;
+        // Deadeye: the hits land as one combined hit (its crit multiplier is in stats.critBonus).
         let combine = deadeyeL && hits > 1 ? hits : 1;
         if (deadeyeL && hits > 1) hits = 1;
         if (!hits) {
@@ -1195,14 +1279,12 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         while (hits > 0 && activity.monsters.length) {
             hits--;
             const target = activity.monsters[0];
-            const targetStats = getMonsterStats(quest, activity.encounterIndex, target.key, adventurer.run?.modifiers);
-            // Enhanced Follow-through: carried hits deal +50%.
-            const carry = carried && followL >= 2 ? 1.5 : 1;
+            const targetStats = getMonsterStats(quest, activity.encounterIndex, target.key, fightKeys(adventurer.run));
             // Each part of a combined hit rolls its own damage and crit.
             let roll = 0, scale = 0, critLevels = 0;
             for (let part = 0; part < combine; part++) {
                 const levels = rollCritLevels(critChance, rng);
-                const partScale = (1 + critBonus * levels) * carry;
+                const partScale = 1 + critBonus * levels;
                 roll += (stats.rollMin + (stats.rollMax - stats.rollMin) * rng()) * partScale;
                 scale += partScale;
                 critLevels = Math.max(critLevels, levels);
@@ -1214,21 +1296,21 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             for (const type of Object.keys(swingDamage) as DamageType[]) {
                 hit[type] = swingDamage[type] * roll;
             }
-            // Fury: +1 physical damage for every 5 missing life (enhanced: every 3). Crits and
-            // carried hits scale it like the rest of the hit.
+            // Fury: +1 physical damage for every 5 missing life (scaled by its effect). Crits scale
+            // it like the rest of the hit.
             if (furyL) {
                 const missing = Math.max(0, stats.maxHealth - adventurer.hp);
-                hit.physical = (hit.physical ?? 0) + missing / (furyL >= 2 ? 3 : 5) * scale;
+                hit.physical = (hit.physical ?? 0) + missing * FURY_PER_MISSING * sc('fury') * scale;
             }
-            // Exploit: +20% (enhanced +35%) for each different ailment on the target.
+            // Exploit: more damage for each different ailment on the target.
             const a = target.ailments;
-            const exploit = exploitL ? 1 + (exploitL >= 2 ? 0.35 : 0.2) * ((a?.burns?.length ? 1 : 0) + (a?.chill ? 1 : 0) + (a?.shock ? 1 : 0)) : 1;
+            const exploit = exploitL ? 1 + EXPLOIT_PER_AILMENT * sc('exploit') * ((a?.burns?.length ? 1 : 0) + (a?.chill ? 1 : 0) + (a?.shock ? 1 : 0)) : 1;
             // Weaken on the hero cuts the damage of each hit before armor and resistances.
             const more = mult * exploit * bloodBonus() * rampage() * weakenFactor(activity.heroAilments);
             if (more !== 1) for (const type of Object.keys(hit) as DamageType[]) hit[type] = (hit[type] ?? 0) * more;
-            const dealtByType = mitigateByType(hit, targetStats.armor, targetStats.resist);
+            const dealtByType = mitigateByType(hit, targetStats.armor, penetrate(targetStats.resist, stats.resistPenetration));
             // Shock on the target raises all damage it takes.
-            const dealt = hurt(target, mitigateDamage(hit, targetStats.armor, targetStats.resist, rng) * shockFactor(target.ailments));
+            const dealt = hurt(target, mitigateDamage(hit, targetStats.armor, penetrate(targetStats.resist, stats.resistPenetration), rng) * shockFactor(target.ailments));
             inflict(target.ailments ??= {}, dealtByType, threshold, rng, parts > 1 ? {...ailmentBonus, rolls: parts} : ailmentBonus);
             // Leech counts only damage the monster had left to lose.
             const effective = Math.min(dealt, Math.max(0, target.hp));
@@ -1281,16 +1363,16 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
                 kills++;
                 if (rs) rs.kills++;
             };
-            // Cleave: the hit also lands on every other monster for 30% (enhanced 50%).
+            // Cleave: the hit also lands on every other monster for a share of it.
             if (cleaveL) {
-                const share = cleaveL >= 2 ? 0.5 : 0.3;
+                const share = CLEAVE_SHARE * sc('cleave');
                 const part: DamageMap = {};
                 for (const type of Object.keys(hit) as DamageType[]) part[type] = (hit[type] ?? 0) * share;
                 for (const other of [...activity.monsters]) {
                     if (other === target || other.hp <= 0) continue;
-                    const otherStats = getMonsterStats(quest, activity.encounterIndex, other.key, adventurer.run?.modifiers);
-                    const otherDealt = hurt(other, mitigateDamage(part, otherStats.armor, otherStats.resist, rng) * shockFactor(other.ailments));
-                    if (rs) addDamage(rs.dealt, mitigateByType(part, otherStats.armor, otherStats.resist), Math.min(otherDealt, other.hp));
+                    const otherStats = getMonsterStats(quest, activity.encounterIndex, other.key, fightKeys(adventurer.run));
+                    const otherDealt = hurt(other, mitigateDamage(part, otherStats.armor, penetrate(otherStats.resist, stats.resistPenetration), rng) * shockFactor(other.ailments));
+                    if (rs) addDamage(rs.dealt, mitigateByType(part, otherStats.armor, penetrate(otherStats.resist, stats.resistPenetration)), Math.min(otherDealt, other.hp));
                     other.hp -= otherDealt;
                     shatterCheck(other);
                     pushCombat({adventurerId: adventurer.id, side: 'monster', slot: other.slot ?? 0, kind: 'hit', amount: otherDealt, critLevels, hitIndex: 0, damageType: mainType(part), killed: other.hp <= 0, hpAfter: Math.max(0, other.hp) / other.maxHp});
@@ -1307,7 +1389,6 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
                 if (!followL) {
                     break;
                 }
-                carried = true;
             }
         }
         const rec = records(adventurer);
@@ -1320,10 +1401,10 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     while (activity.cooldown <= 0 && activity.monsters.length) {
         if (!attack(1, false)) return;
     }
-    // Counterstrike: blocks since the last tick each earn a free attack at 50% (enhanced 100%).
+    // Counterstrike: blocks since the last tick each earn a free attack at a share of the damage.
     while (activity.counters && activity.monsters.length) {
         activity.counters--;
-        if (!attack(counterL >= 2 ? 1 : 0.5, true)) return;
+        if (!attack(COUNTER_DAMAGE * sc('counterstrike'), true)) return;
     }
     activity.counters = 0;
     if (!activity.monsters.length) {
@@ -1333,7 +1414,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     }
     // Every monster still standing attacks on its own cooldown.
     for (const front of activity.monsters) {
-        const frontStats = getMonsterStats(quest, activity.encounterIndex, front.key, adventurer.run?.modifiers);
+        const frontStats = getMonsterStats(quest, activity.encounterIndex, front.key, fightKeys(adventurer.run));
         front.age = (front.age ?? 0) + dt;
         const will = willFactor(front);
         // Rising will heals on each new stack. Shatter phases already passed stay passed.
@@ -1409,11 +1490,13 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
                 if (e.applies) {
                     const kind = e.applies.ailment;
                     const element = ({burn: 'fire', chill: 'cold', shock: 'lightning'} as Record<string, Element>)[kind];
-                    const amount = e.applies.amount * (element ? 1 - Math.max(0, stats.resist[element] ?? 0) : 1);
+                    const amount = e.applies.amount * (element ? 1 - Math.max(0, stats.resist[element] ?? 0) : 1) * (1 - tg('reducedAilmentEffectTaken'));
                     const a = activity.heroAilments ??= {};
                     // A burn or bleed too weak to matter (under MIN_DOT_DPS) is dropped, with no announcement.
-                    let applied = true;
-                    if (kind === 'burn') {
+                    let applied = !avoidsAilment();
+                    if (!applied) {
+                        // Avoided (Amber Reliquary): nothing takes hold.
+                    } else if (kind === 'burn') {
                         const dps = amount * roll();
                         if (dps >= MIN_DOT_DPS) (a.burns ??= []).push({dps, remaining: BURN_SECONDS + 1}); else applied = false;
                     }
@@ -1491,7 +1574,7 @@ export function tickAdventurer(state: GameState, adventurer: Adventurer, dt: num
         }
     } else if (activity.kind === 'resting') {
         const stats = getCachedStats(state, adventurer);
-        activity.remaining -= dt * restSpeed(stats.maxHealth, stats.lifeRegen, adventurer.level);
+        activity.remaining -= dt * restSpeed(stats.maxHealth, stats.lifeRegen * (1 + (stats.gear.increasedRecovery ?? 0)), adventurer.level);
         if (activity.remaining > 0 && adventurer.autoRecover) {
             const cost = getRecoverCost(state, adventurer);
             if (cost <= getAutoRecoverBudget(adventurer)) {
@@ -1518,7 +1601,7 @@ export function tickAdventurer(state: GameState, adventurer: Adventurer, dt: num
         // Idle at the guild heals at the resting rate (a full refill from 0 HP in 15 seconds).
         const stats = getCachedStats(state, adventurer);
         if (adventurer.hp < stats.maxHealth) {
-            adventurer.hp = Math.min(stats.maxHealth, adventurer.hp + stats.maxHealth / 15 * dt * restSpeed(stats.maxHealth, stats.lifeRegen, adventurer.level));
+            adventurer.hp = Math.min(stats.maxHealth, adventurer.hp + stats.maxHealth / 15 * dt * restSpeed(stats.maxHealth, stats.lifeRegen * (1 + (stats.gear.increasedRecovery ?? 0)), adventurer.level));
         }
         // Retries when waiting on gold for an entry fee.
         if (adventurer.assignment) startRun(state, adventurer);

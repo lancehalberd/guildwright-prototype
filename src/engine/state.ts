@@ -83,6 +83,7 @@ function adventurerFromApplicant(state: GameState, applicant: Applicant): Advent
     adventurer.ambitions = applicant.ambitions;
     if (applicant.passives) adventurer.passives = applicant.passives;
     if (applicant.bonuses) adventurer.bonuses = applicant.bonuses;
+    if (applicant.curses) adventurer.curses = applicant.curses;
     adventurer.records = emptyRecords();
     invalidateStats();
     adventurer.hp = getAdventurerStats(state, adventurer).maxHealth;

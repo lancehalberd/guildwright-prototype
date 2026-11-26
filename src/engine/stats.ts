@@ -1,7 +1,7 @@
 import {itemTypes, slotOrder} from '../data/items';
 import {requireMaterial} from '../data/materials';
 import {classPassive, classes, damageStats} from '../data/quests';
-import {bonusMultiplier, passiveLevel} from '../data/passives';
+import {bonusMultiplier, DEADEYE_CRIT_MULTI, DUAL_MORE, ELEMENTAL_MORE, ELEMENTAL_PENETRATION, FOLLOW_ACCURACY, FURY_PER_MAX, MARTIAL_CRIT, MARTIAL_CRIT_MULTI, MARTIAL_SPEED_PER_LEVEL, passiveLevel, passiveScale, SIPHON_WARD, type PassiveKey} from '../data/passives';
 import {equippedBonuses} from '../data/trophies';
 import {getCraftedItemStats, getMaterialEquipStats} from './crafting';
 import {addStats, elements, resistStat} from '../data/stats';
@@ -63,6 +63,10 @@ export interface AdventurerStats {
     lifeRegen: number
     lifeLeech: number
     lifeOnHit: number
+    // Elemental mastery: subtracted from every monster elemental resistance, which can go negative.
+    resistPenetration: number
+    // Each core passive's effect scale (data/passives.ts passiveScale): absent = the hero lacks it.
+    passiveScale: Partial<Record<PassiveKey, number>>
     weaponName: string
     // Dual wielding: the main-hand and off-hand swings, which alternate. Each sets its own cooldown.
     strikes?: Strike[]
@@ -104,11 +108,13 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
     const cls = classes[adventurer.classKey];
     const level = adventurer.level;
     const pl = (key: Parameters<typeof passiveLevel>[1]) => passiveLevel(adventurer, key, classPassive);
+    // How strong each core passive's scaling numbers are: 1, plus enhanced and guild increases.
+    const ps = (key: PassiveKey) => passiveScale(adventurer, key, classPassive, g('corePassiveEffect'));
     // Each class grows its own number of points per attribute per level. Rare bonuses multiply totals.
     const b = (key: Parameters<typeof bonusMultiplier>[1]) => bonusMultiplier(adventurer, key);
-    const str = Math.floor((cls.growth.str * level + g('str')) * b('str'));
-    const dex = Math.floor((cls.growth.dex * level + g('dex')) * b('dex'));
-    const int = Math.floor((cls.growth.int * level + g('int')) * b('int'));
+    const str = Math.floor((cls.growth.str * level + g('str')) * b('str') * (1 + g('increasedStr')));
+    const dex = Math.floor((cls.growth.dex * level + g('dex')) * b('dex') * (1 + g('increasedDex')));
+    const int = Math.floor((cls.growth.int * level + g('int')) * b('int') * (1 + g('increasedInt')));
     const attr = {str, dex, int};
     // The class's fastest-growing attributes, averaged, are its core value.
     const tops = damageStats(cls);
@@ -119,19 +125,23 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
     // 1.5 attacks a second, with extra crit.
     const emptyHands = unarmed && !adventurer.equipment.offHand;
     const martial = emptyHands ? pl('martialArts') : 0;
+    const martialScale = martial ? ps('martialArts') : 0;
     // Fighters with no shield to block with parry instead: a staff, two weapons or Martial arts
     // give a flat block chance (once, not stacked).
     const parry = dual || martial || weapons.some(w => w.itemType === 'staff') ? PARRY_BLOCK : 0;
+    // Martial arts with Dual mastery too (only a Vagabond can roll both): the two fists count as dual
+    // wielding. A hidden combination: nothing seen before hiring a Vagabond mentions it (see data/passives.ts).
+    const fists = !!martial && !!pl('dualMastery');
 
     const maxHealth = Math.floor((20 + 4 * level + 2 * str + g('maxHealth')) * (1 + g('increasedMaxHealth')) * b('maxHealth'));
     const physicalMore = 1 + g('increasedDamage') + g('increasedPhysicalDamage');
-    const elementalMore = (1 + g('increasedDamage') + g('increasedElementalDamage')) * (1 + pl('elementalMastery'));
+    const elementalMore = (1 + g('increasedDamage') + g('increasedElementalDamage')) * (1 + ELEMENTAL_MORE * ps('elementalMastery'));
     // Conversion moves physical damage to elements before scaling. Over 100% in total is scaled down.
     const toFire = g('physicalToFire'), toCold = g('physicalToCold'), toLightning = g('physicalToLightning');
     const converted = toFire + toCold + toLightning;
     const share = converted > 1 ? 1 / converted : 1;
     const kept = 1 - Math.min(1, converted);
-    const dmg = b('damage');
+    const dmg = b('damage') * (1 + g('moreDamage'));
     type Flat = Record<DamageType, number>;
     const strike = (flat: Flat): Flat => ({
         physical: flat.physical * kept * physicalMore * dmg,
@@ -143,13 +153,16 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
     // Defenses turned into damage: a share of max HP as fire, of evasion as cold, of max ward as
     // lightning, added to every hit like flat damage from gear.
     const evasion = Math.floor((g('evasion') + dex) * (1 + g('increasedEvasion')) * b('evasion'));
-    const maxWard = Math.floor((int + g('ward')) * b('ward') * (pl('siphonWard') > 1 ? 1.75 : pl('siphonWard') ? 1.5 : 1));
+    const maxWard = Math.floor((int + g('ward')) * b('ward') * (1 + g('increasedWard')) * (1 + SIPHON_WARD * ps('siphonWard')));
     const fromDefense: Record<DamageType, number> = {physical: 0, fire: g('healthAsFire') * maxHealth, cold: g('evasionAsCold') * evasion, lightning: g('wardAsLightning') * maxWard};
     const gf = (t: DamageType) => g(flatKeys[t]) + fromDefense[t];
     // Unarmed hits for 1. Half the core stat is added as flat physical damage (all of it with Martial arts).
-    const coreFlat = (unarmed ? 1 : 0) + coreValue * (martial ? 1 : 0.5);
+    // Fury also adds +1 physical damage per 10 max HP (scaled by its effect), on top of its missing-life bonus.
+    const furyFlat = Math.floor(maxHealth * FURY_PER_MAX * ps('fury'));
+    const coreFlat = (unarmed ? 1 : 0) + coreValue * (martial ? 1 : 0.5) + furyFlat;
     let damage: Flat;
-    const speedMore = (1 + g('attackSpeed')) * b('attackSpeed');
+    // Martial arts: +1% increased attack speed per level, added to gear's increased attack speed.
+    const speedMore = (1 + g('attackSpeed') + MARTIAL_SPEED_PER_LEVEL * martialScale * level) * b('attackSpeed');
     let strikes: Strike[] | undefined;
     if (dual) {
         // Swings alternate main hand and off hand. Each hits with its own weapon's flat damage plus
@@ -158,7 +171,7 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
         const others = Object.fromEntries((Object.keys(flatKeys) as DamageType[]).map(t =>
             [t, gf(t) - weapons.reduce((sum, w) => sum + (w.stats.stats[flatKeys[t]] ?? 0), 0)])) as Flat;
         const mastery = pl('dualMastery');
-        const mult = [1, 1.25, 1.5][mastery];
+        const mult = 1 + DUAL_MORE * ps('dualMastery');
         const pace = mastery ? 2 : 1.5;
         strikes = weapons.map(w => {
             const hit = strike(Object.fromEntries((Object.keys(flatKeys) as DamageType[]).map(t =>
@@ -171,6 +184,17 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
         });
         // The average swing, for display and anything that reads one damage figure.
         damage = Object.fromEntries((Object.keys(flatKeys) as DamageType[]).map(t => [t, (strikes![0].damage[t] + strikes![1].damage[t]) / 2])) as Flat;
+    } else if (fists) {
+        // Fists alternate like two weapons with Dual mastery's full doubled pace and extra damage.
+        const mult = 1 + DUAL_MORE * ps('dualMastery');
+        const hit = strike({physical: gf('physical') + coreFlat, fire: gf('fire'), cold: gf('cold'), lightning: gf('lightning')});
+        const fist = (weaponName: string): Strike => ({
+            weaponName,
+            damage: Object.fromEntries((Object.keys(flatKeys) as DamageType[]).map(t => [t, mult * hit[t]])) as Flat,
+            attacksPerSecond: 2 * 1.5 * speedMore,
+        });
+        strikes = [fist('Right fist'), fist('Left fist')];
+        damage = strikes[0].damage;
     } else {
         damage = strike({physical: gf('physical') + coreFlat, fire: gf('fire'), cold: gf('cold'), lightning: gf('lightning')});
     }
@@ -178,20 +202,22 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
     const attacksPerSecond = strikes ? 2 / strikes.reduce((sum, st) => sum + 1 / st.attacksPerSecond, 0)
         : (martial ? 1.5 : unarmed ? 1 : weapons[0].stats.attacksPerSecond ?? 1) * speedMore;
     const resistTotal = Object.fromEntries(elements.map(e => [e, g(resistStat[e])])) as Record<Element, number>;
-    const resist = Object.fromEntries(elements.map(e => [e, Math.min(RESIST_CAP, resistTotal[e])])) as Record<Element, number>;
+    const resistCap: Record<Element, number> = {fire: RESIST_CAP + g('maxFireResist'), cold: RESIST_CAP + g('maxColdResist'), lightning: RESIST_CAP + g('maxLightningResist')};
+    const resist = Object.fromEntries(elements.map(e => [e, Math.min(resistCap[e], resistTotal[e])])) as Record<Element, number>;
     return {
         str, dex, int, maxHealth, damage,
         damagePerHit: damage.physical + damage.fire + damage.cold + damage.lightning,
         attacksPerSecond,
         strikes,
-        accuracy: Math.floor((BASE_ACCURACY + 2 * level + 2 * dex + g('accuracy')) * b('accuracy')),
+        // Follow-through (the Ranger's passive) also raises accuracy: 1.5x, or 1.75x enhanced.
+        accuracy: Math.floor((BASE_ACCURACY + 2 * level + 2 * dex + g('accuracy')) * b('accuracy') * (1 + g('increasedAccuracy')) * (1 + FOLLOW_ACCURACY * ps('followThrough'))),
         armor: Math.floor(g('armor') * (1 + g('increasedArmor')) * b('armor')),
         evasion,
-        blockChance: Math.min(BLOCK_CAP, g('blockChance') + parry),
+        blockChance: Math.min(BLOCK_CAP + g('maxBlockChance'), g('blockChance') + parry),
         resist,
         resistTotal,
-        critChance: (int / 100 + g('critChance') + 0.15 * martial) * b('critChance'),
-        critBonus: 0.5 + g('critMultiplier') + 0.5 * martial,
+        critChance: (int / 100 + g('critChance') + MARTIAL_CRIT * martialScale) * b('critChance'),
+        critBonus: 0.5 + g('critMultiplier') + MARTIAL_CRIT_MULTI * martialScale + DEADEYE_CRIT_MULTI * ps('deadeye'),
         rollMin: 0.85 * (1 + str / 100),
         rollMax: 1.15 * (1 + 2 * str / 100),
         // Siphon ward (the Priest's passive) also raises max ward: 1.5x, or 1.75x enhanced.
@@ -202,8 +228,10 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
         // Blood pact carries 5% life leech of its own.
         lifeLeech: (g('lifeLeech') + (pl('bloodPact') ? 0.05 : 0)) * b('lifeLeech'),
         lifeOnHit: g('lifeOnHit'),
+        resistPenetration: ELEMENTAL_PENETRATION * ps('elementalMastery'),
+        passiveScale: Object.fromEntries(((adventurer.passives?.map(p => p.key)) ?? (classPassive(adventurer.classKey) ? [classPassive(adventurer.classKey)!] : [])).map(k => [k, ps(k)])),
         weaponName: weapons.map(w => w.name).join(' & ') || 'Unarmed',
-        wieldNote: dual ? `dual wielding, alternating swings${pl('dualMastery') ? `, ${[100, 125, 150][pl('dualMastery')]}% damage` : ''}, +15% block` : martial ? 'unarmed, Martial arts, +15% block' : unarmed && pl('martialArts') ? 'unarmed, but the off hand item turns off Martial arts' : unarmed ? 'unarmed' : parry ? 'staff, +15% block' : '',
+        wieldNote: fists ? `unarmed, Martial arts, fists dual wield, ${Math.round(100 * (1 + DUAL_MORE * ps('dualMastery')))}% damage, +15% block` : dual ? `dual wielding, alternating swings${pl('dualMastery') ? `, ${Math.round(100 * (1 + DUAL_MORE * ps('dualMastery')))}% damage` : ''}, +15% block` : martial ? 'unarmed, Martial arts, +15% block' : unarmed && pl('martialArts') ? 'unarmed, but the off hand item turns off Martial arts' : unarmed ? 'unarmed' : parry ? 'staff, +15% block' : '',
         gear,
     };
 }
@@ -260,6 +288,11 @@ export function mitigateDamage(damage: DamageMap, armor: number, resist: Partial
     const m = mitigateByType(damage, armor, resist);
     const total = (m.physical ?? 0) + elements.reduce((sum, e) => sum + (m[e] ?? 0), 0);
     return total >= 1 ? total : rng() < total ? 1 : 0;
+}
+// A monster's resistances as the hero's hits see them, after resistance penetration.
+export function penetrate(resist: Partial<Record<Element, number>>, pen: number): Partial<Record<Element, number>> {
+    if (!pen) return resist;
+    return Object.fromEntries(elements.map(e => [e, (resist[e] ?? 0) - pen]));
 }
 // Each damage type after armor (physical) or resistance (elements).
 export function mitigateByType(damage: DamageMap, armor: number, resist: Partial<Record<Element, number>>): DamageMap {

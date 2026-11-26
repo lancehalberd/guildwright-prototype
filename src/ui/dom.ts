@@ -80,3 +80,15 @@ export function num(value: number, digits = 2): string {
 export function fmt(value: number, digits = 0): string {
     return value.toFixed(digits);
 }
+
+// At most 6 characters: whole numbers up to 999999, then 3 significant digits with a suffix
+// (1.23M, 12.3M, 123M, then B, T, Qa). Rounds down so it never shows more than there is.
+export function shortNumber(n: number): string {
+    const v = Math.floor(n);
+    if (v < 1e6) return String(v);
+    const units = ['M', 'B', 'T', 'Qa'];
+    let i = 0, x = v / 1e6;
+    while (x >= 1000 && i < units.length - 1) { x /= 1000; i++; }
+    const s = x < 10 ? (Math.floor(x * 100) / 100).toFixed(2) : x < 100 ? (Math.floor(x * 10) / 10).toFixed(1) : String(Math.floor(x));
+    return s + units[i];
+}

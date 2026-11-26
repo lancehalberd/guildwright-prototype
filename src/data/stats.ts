@@ -62,7 +62,33 @@ const list: StatDef[] = [
     {key: 'chillChance', label: 'chance to chill', group: 'offense', format: 'percent', description: 'Added to the 25% chance that a hit carrying cold damage chills the target.'},
     {key: 'shockChance', label: 'chance to shock', group: 'offense', format: 'percent', description: 'Added to the 25% chance that a hit carrying lightning damage shocks the target.'},
     {key: 'ailmentEffect', label: 'ailment effect', group: 'offense', format: 'percent', description: 'Makes your burns deal more damage, and your chills and shocks stronger. Chill and Shock still stop at their 50% caps.'},
+
+    // Trophy-only stats: no material carries these (data/trophies.ts).
+    {key: 'increasedStr', label: 'increased Str', group: 'core', format: 'percent', description: 'Multiplies Str.'},
+    {key: 'increasedDex', label: 'increased Dex', group: 'core', format: 'percent', description: 'Multiplies Dex.'},
+    {key: 'increasedInt', label: 'increased Int', group: 'core', format: 'percent', description: 'Multiplies Int.'},
+    {key: 'increasedRecovery', label: 'increased recovery', group: 'life', format: 'percent', description: 'Multiplies all HP and ward you regain: regeneration, leech, life on hit and ward gains.'},
+    {key: 'dodgeChance', label: 'chance to dodge', group: 'defense', format: 'percent', description: 'Each hit that gets past your evasion has this chance to miss anyway. A dodged hit doesn\'t end the attacker\'s chain of hits.'},
+    {key: 'maxBlockChance', label: 'max block', group: 'defense', format: 'percent', description: 'Raises the 75% block cap.'},
+    {key: 'maxFireResist', label: 'max fire res', group: 'defense', format: 'percent', description: 'Raises the 75% fire resistance cap.'},
+    {key: 'maxColdResist', label: 'max cold res', group: 'defense', format: 'percent', description: 'Raises the 75% cold resistance cap.'},
+    {key: 'maxLightningResist', label: 'max lightning res', group: 'defense', format: 'percent', description: 'Raises the 75% lightning resistance cap.'},
+    {key: 'increasedWard', label: 'increased ward', group: 'defense', format: 'percent', description: 'Multiplies max ward.'},
+    {key: 'reducedAilmentEffectTaken', label: 'reduced ailment effect on you', group: 'defense', format: 'percent', description: 'Ailments monsters put on you are this much weaker.'},
+    {key: 'avoidAilmentChance', label: 'chance to avoid ailments', group: 'defense', format: 'percent', description: 'Chance that an ailment a monster would put on you doesn\'t take hold.'},
+    {key: 'lessDamageTaken', label: 'less damage taken', group: 'defense', format: 'percent', description: 'Multiplies all damage you take, after armor and resistances.'},
+    {key: 'lessElementalDamageTaken', label: 'less elemental damage taken', group: 'defense', format: 'percent', description: 'Multiplies fire, cold and lightning damage you take, after resistances.'},
+    {key: 'reducedReflectedDamageTaken', label: 'reduced reflected damage taken', group: 'defense', format: 'percent', description: 'Reduces damage reflected back at you.'},
+    {key: 'reducedDamageOverTimeTaken', label: 'reduced damage over time taken', group: 'defense', format: 'percent', description: 'Reduces damage from burns, bleeds and other damage over time.'},
+    {key: 'increasedAccuracy', label: 'increased accuracy', group: 'offense', format: 'percent', description: 'Multiplies accuracy.'},
+    {key: 'moreDamage', label: 'more damage', group: 'offense', format: 'percent', description: 'Multiplies all damage you deal, separately from increased damage.'},
+    {key: 'increasedAilmentChance', label: 'increased ailment chance', group: 'offense', format: 'percent', description: 'Multiplies your chance to ignite, chill and shock.'},
+    {key: 'increasedAilmentLimits', label: 'increased chill, shock and burn limits', group: 'offense', format: 'percent', description: 'Raises the caps of your chills and shocks and makes your burns last longer.'},
+    {key: 'corePassiveEffect', label: 'increased core passive effect', group: 'offense', format: 'percent', description: 'Strengthens the hero\'s core passive.'},
 ];
+// Stats only trophies give, kept out of material and crafting filters.
+export const trophyOnlyStats = new Set<StatKey>(['increasedStr', 'increasedDex', 'increasedInt', 'increasedRecovery', 'dodgeChance', 'maxBlockChance', 'maxFireResist', 'maxColdResist', 'maxLightningResist', 'increasedWard',
+    'reducedAilmentEffectTaken', 'avoidAilmentChance', 'lessDamageTaken', 'lessElementalDamageTaken', 'reducedReflectedDamageTaken', 'reducedDamageOverTimeTaken', 'increasedAccuracy', 'moreDamage', 'increasedAilmentChance', 'increasedAilmentLimits', 'corePassiveEffect']);
 
 // For filtering: which stat a modifier is about, and how it applies. "increased armor" and "armor"
 // share the family "armor", with % and + kinds. "x" is reserved for multipliers.

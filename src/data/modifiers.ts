@@ -108,3 +108,24 @@ export const riteModifier: QuestModifierDef = {
         ],
     },
 };
+
+// Challenges: modifiers a run takes on from trophies rather than the modifier list. They never count
+// toward modifier totals (trophy tiers, XP, contracts).
+// Endless trial (from the quest's Endless banner): each level +100% increased monster life and
+// damage and +50% increased premium drop chance. One level opens per TRIAL_STEP Endless encounters.
+export const TRIAL_STEP = 20;
+export const TRIAL_MONSTER = 1, TRIAL_PREMIUM = 0.5;
+export const trialKey = (level: number) => `trial:${level}`;
+// The Void (the Empty Vessel's stone): +1000% increased monster life and damage, +400% increased
+// premium drop chance. Increased, so it adds with the trial's increases.
+export const VOID_KEY = 'void';
+export const VOID_MONSTER = 10, VOID_PREMIUM = 4;
+export function challengeModifier(key: string): QuestModifierDef | undefined {
+    const trial = /^trial:(\d+)$/.exec(key);
+    if (trial) {
+        const level = Number(trial[1]);
+        return {key, name: `Endless trial ${level}`, monster: {hp: {increased: TRIAL_MONSTER * level}, damage: {increased: TRIAL_MONSTER * level}}, bonuses: {premiumChance: TRIAL_PREMIUM * level}, feeWeight: 0, unlock: {kind: 'firstClear'}};
+    }
+    if (key === VOID_KEY) return {key, name: 'The Void', monster: {hp: {increased: VOID_MONSTER}, damage: {increased: VOID_MONSTER}}, bonuses: {premiumChance: VOID_PREMIUM}, feeWeight: 0, unlock: {kind: 'firstClear'}};
+    return undefined;
+}

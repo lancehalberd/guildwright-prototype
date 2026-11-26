@@ -1,7 +1,7 @@
 import {itemTypes} from '../data/items';
 import {ACCURACY_GROWTH, EVASION_GROWTH, monsterBaseline, powerForLevel} from '../data/quests';
 import {elements, statOrder} from '../data/stats';
-import {expectedCritMultiplier, expectedHits, getAdventurerStats, hitChance, mitigateByType, resolveItemRef, type AdventurerStats} from './stats';
+import {expectedCritMultiplier, expectedHits, getAdventurerStats, hitChance, mitigateByType, penetrate, resolveItemRef, type AdventurerStats} from './stats';
 import type {Adventurer, CraftedItem, DamageMap, DamageType, GameState, ItemRef, SlotKey, StatKey} from './types';
 
 // Gear comparison: what equipping something would change for a hero. Two computed figures sum it
@@ -34,7 +34,7 @@ function sumDamage(map: DamageMap): number {
 export function gearPower(stats: AdventurerStats, level: number): GearPower {
     const m = referenceMonster(level);
     const avgRoll = (stats.rollMin + stats.rollMax) / 2;
-    const perHit = (damage: Record<DamageType, number>) => Math.max(1, sumDamage(mitigateByType(damage, m.armor, {})));
+    const perHit = (damage: Record<DamageType, number>) => Math.max(1, sumDamage(mitigateByType(damage, m.armor, penetrate({}, stats.resistPenetration))));
     const hits = expectedHits(stats.accuracy, m.evasion);
     const crit = expectedCritMultiplier(stats.critChance, stats.critBonus);
     // Alternating swings: damage of a pair over the time a pair takes.

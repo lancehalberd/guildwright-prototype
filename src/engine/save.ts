@@ -1,6 +1,7 @@
 import {quests} from '../data/quests';
 import {checkProgress, createNewGame, SAVE_VERSION} from './state';
-import {giveAmbitions, MAX_LEVEL_AMBITION} from './ambitions';
+import {tierFor, trophies, trophyList} from '../data/trophies';
+import {giveAmbitions, MAX_LEVEL_AMBITION, replaceUnreachableAmbitions} from './ambitions';
 import {slotUnlocks, startingGuild, unlockFame} from '../data/milestones';
 import {APPLICANT_SLOTS, applicantSlotFame, applicantSlots} from './ambitions';
 import {invalidateStats} from './stats';
@@ -162,8 +163,16 @@ function fitToQuests(state: GameState): GameState {
         (state.notices ??= []).push(`${item.name}: ${removed.map(k => requireMaterial(k).name).join(', ')} returned to your materials (too strong a decoration for its bases)`);
     }
     if (state.notices?.length) invalidateStats();
+    // Endless trophies became banners (v325): always in effect, so they leave the trophy slots, and
+    // their tiers follow the new encounter targets.
+    state.trophySlots = state.trophySlots?.map(k => k && trophies[k]?.kind === 'endless' ? null : k);
+    for (const def of trophyList) if (def.kind === 'endless' && state.trophies?.[def.key] !== undefined) {
+        const tier = tierFor(def, def.value(state));
+        if (tier >= 0) state.trophies[def.key] = tier; else delete state.trophies[def.key];
+    }
     // Applicants' level ambitions cap like members' (see giveAmbitions).
-    for (const app of state.applicants ?? []) for (const a of app.ambitions ?? []) if (a.kind === 'level' && a.target > MAX_LEVEL_AMBITION) a.target = MAX_LEVEL_AMBITION;
+    for (const app of state.applicants ?? []) if (app.classKey !== 'emptyVessel') for (const a of app.ambitions ?? []) if (a.kind === 'level' && a.target > MAX_LEVEL_AMBITION) a.target = MAX_LEVEL_AMBITION;
+    for (const app of state.applicants ?? []) replaceUnreachableAmbitions(app);
     for (const adventurer of state.adventurers) {
         giveAmbitions(state, adventurer);
         const a = adventurer.activity;

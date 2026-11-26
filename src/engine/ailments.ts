@@ -24,6 +24,8 @@ export type AilmentKind = 'burn' | 'chill' | 'shock';
 // What a hero's gear adds: flat chance per ailment and more effect. Monsters use the defaults.
 export interface AilmentBonus {
     chance?: Partial<Record<AilmentKind, number>>
+    // Increased ailment chance: multiplies each chance.
+    chanceMore?: number
     effect?: number
     // Exploit: longer burns, and a higher chill and shock cap.
     burnSeconds?: number
@@ -41,12 +43,12 @@ export function ailmentSeconds(a: Ailments | undefined): number {
 
 // Rolls ailments for one landed hit. Returns the ones that took hold.
 export function inflict(target: Ailments, dealt: DamageMap, threshold: number, rng: () => number, bonus: AilmentBonus = {}): AilmentKind[] {
-    const p = (k: AilmentKind) => Math.min(1, AILMENT_CHANCE + (bonus.chance?.[k] ?? 0));
+    const p = (k: AilmentKind) => Math.min(1, (AILMENT_CHANCE + (bonus.chance?.[k] ?? 0)) * (1 + (bonus.chanceMore ?? 0)));
     const rolls = Math.max(1, bonus.rolls ?? 1);
     // Chance that at least one of the rolls succeeds; one rng draw keeps a single roll unchanged.
     const chance = (k: AilmentKind) => 1 - Math.pow(1 - p(k), rolls);
     const cap = bonus.cap ?? 0;
-    const effect = 1 + (bonus.effect ?? 0);
+    const effect = Math.max(0, 1 + (bonus.effect ?? 0));
     const landed: AilmentKind[] = [];
     const fire = dealt.fire ?? 0, cold = dealt.cold ?? 0, lightning = dealt.lightning ?? 0;
     if (fire > 0 && rng() < chance('burn') && BURN_SHARE * fire * effect >= MIN_DOT_DPS) {

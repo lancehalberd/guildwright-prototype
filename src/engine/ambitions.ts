@@ -1,6 +1,7 @@
 import {classes, monsters, quests, questXpLevel} from '../data/quests';
 import {requireMaterial} from '../data/materials';
-import {passives as passiveDefs, rollBonuses, type PassiveKey} from '../data/passives';
+import {curseCount, passives as passiveDefs, rollBonuses, VESSEL_CURSES, type PassiveKey} from '../data/passives';
+import {trophyTotal} from '../data/trophies';
 import {slotFame} from '../data/milestones';
 import type {HeroPassive, AdventurerRecords, Adventurer, Ambition, AmbitionKind, Applicant, GameState} from './types';
 
@@ -67,10 +68,17 @@ export function guildTier(state: GameState): number {
 
 const pick = <T>(list: T[], rng: () => number): T => list[Math.floor(rng() * list.length)];
 
+interface AmbitionInfo {
+    classKey: string
+    multiKill: boolean
+    // Deadeye lands every hit of an attack as one combined hit, so a multi-hit chain can't happen.
+    combinedHits: boolean
+}
+
 interface Template {
     kind: AmbitionKind
     // Returns undefined when the template doesn't fit this tier or class.
-    make(tier: number, info: {classKey: string, multiKill: boolean}, rng: () => number): Omit<Ambition, 'tier' | 'fame' | 'kind'> | undefined
+    make(tier: number, info: AmbitionInfo, rng: () => number): Omit<Ambition, 'tier' | 'fame' | 'kind'> | undefined
 }
 
 const progressTemplates: Template[] = [
@@ -87,7 +95,7 @@ const progressTemplates: Template[] = [
 
 const buildTemplates: Template[] = [
     {kind: 'bigHit', make: tier => ({target: [60, 250, 600, 1500, 4000, 8000, 15000, 30000][tier]})},
-    {kind: 'chain', make: tier => ({target: [5, 6, 7, 8, 9, 10, 11, 12][tier]})},
+    {kind: 'chain', make: (tier, info) => info.combinedHits ? undefined : {target: [5, 6, 7, 8, 9, 10, 11, 12][tier]}},
     {kind: 'multiKill', make: (tier, info) => info.multiKill ? {target: [2, 3, 3, 4, 5, 5, 6, 6][tier]} : undefined},
     {kind: 'clearMods', make: (tier, _c, rng) => {
         const options: [string, number][][] = [[['brambleRoad', 1]], [['brambleRoad', 3], ['hollowMines', 1]], [['hollowMines', 3], ['ashenPeaks', 1], ['sunkenMarsh', 1], ['thunderheadCrags', 1]], [['ashenPeaks', 3], ['sunkenMarsh', 3], ['thunderheadCrags', 3], ['hollowMines', 5]], [['ashenPeaks', 5], ['sunkenMarsh', 5], ['thunderheadCrags', 5], ['hollowMines', 7], ['sunderedRift', 1]],
@@ -138,10 +146,31 @@ function bossAmbition(tier: number, rng: () => number, startLevel = 1): Omit<Amb
     return {quest, target: 1, mods};
 }
 
+function ambitionInfo(classKey: string, keys: PassiveKey[]): AmbitionInfo {
+    return {classKey, multiKill: keys.includes('followThrough') || keys.includes('cleave'), combinedHits: keys.includes('deadeye')};
+}
+
+// Swaps out ambitions the holder's passives can never fulfil (a Deadeye hero's multi-hit chain)
+// for another build ambition they don't have yet, at the same tier and fame.
+export function replaceUnreachableAmbitions(holder: {classKey: string, passives?: {key: PassiveKey}[], ambitions?: Ambition[]}, rng: () => number = Math.random) {
+    if (!holder.ambitions) return;
+    const keys = holder.passives?.map(p => p.key) ?? (classes[holder.classKey]?.passiveKey ? [classes[holder.classKey].passiveKey!] : []);
+    const info = ambitionInfo(holder.classKey, keys);
+    if (!info.combinedHits) return;
+    holder.ambitions = holder.ambitions.flatMap(a => {
+        if (a.kind !== 'chain' || a.done) return [a];
+        const options = buildTemplates.filter(t => !holder.ambitions!.some(o => o.kind === t.kind))
+            .map(t => ({t, made: t.make(a.tier, info, rng)})).filter(x => x.made);
+        if (!options.length) return [];
+        const o = pick(options, rng);
+        return [{kind: o.t.kind, tier: a.tier, fame: a.fame, ...o.made!}];
+    });
+}
+
 export function rollAmbitions(tier: number, classKey: string, rng: () => number = Math.random, startLevel = 1, passiveKeys?: PassiveKey[]): Ambition[] {
     const keys = passiveKeys ?? (classes[classKey]?.passiveKey ? [classes[classKey].passiveKey!] : []);
     // Killing several monsters with one attack needs a passive that reaches past the first.
-    const info = {classKey, multiKill: keys.includes('followThrough') || keys.includes('cleave')};
+    const info = ambitionInfo(classKey, keys);
     const fame = AMBITION_FAME[tier];
     const out: Ambition[] = [];
     const progress = progressTemplates.map(t => ({t, made: t.make(tier, info, rng)})).filter(x => x.made);
@@ -248,7 +277,7 @@ function rollApplicantTier(state: GameState, rng: () => number): number {
 
 // Classes an applicant of this tier can be: every class tier up to it, weighted toward the newest.
 function rollClass(tier: number, rng: () => number): string {
-    const options = Object.values(classes).filter(c => c.tier <= tier);
+    const options = Object.values(classes).filter(c => c.tier <= tier && !c.hidden);
     const total = options.reduce((sum, c) => sum + 1 + c.tier, 0);
     let r = rng() * total;
     return (options.find(c => (r -= 1 + c.tier) < 0) ?? options[0]).key;
@@ -258,7 +287,7 @@ function rollClass(tier: number, rng: () => number): string {
 function rollCorePassives(classKey: string, rng: () => number): HeroPassive[] | undefined {
     const special = classes[classKey].special;
     if (!special) return undefined;
-    const pool = [...new Set(Object.values(classes).filter(c => !c.special && c.passiveKey).map(c => c.passiveKey!))];
+    const pool = [...new Set(Object.values(classes).filter(c => !c.special && !c.hidden && c.passiveKey).map(c => c.passiveKey!))];
     const out: HeroPassive[] = [];
     for (let n = special === 'enhanced' ? 1 : 3; n > 0 && pool.length; n--) {
         const key = pool.splice(Math.floor(rng() * pool.length), 1)[0];
@@ -271,21 +300,34 @@ export function passiveNames(list: HeroPassive[]): string {
     return list.map(p => (p.enhanced ? 'Enhanced ' : '') + passiveDefs[p.key].name).join(', ');
 }
 
+// An Empty Vessel's one ambition: reach level 75, past the usual MAX_LEVEL_AMBITION.
+export const VESSEL_LEVEL = 75;
+function vesselAmbition(tier: number): Ambition {
+    return {kind: 'level', tier, fame: AMBITION_FAME[tier] * 3, target: VESSEL_LEVEL};
+}
+
 export function rollApplicant(state: GameState, taken: Set<string>, rng: () => number = Math.random): Applicant {
     const tier = rollApplicantTier(state, rng);
-    const classKey = rollClass(tier, rng);
-    const corePassives = rollCorePassives(classKey, rng);
-    // One rare bonus slot per tier the class sits below the applicant's tier.
-    const bonuses = rollBonuses(Math.max(0, tier - classes[classKey].tier), rng);
+    let classKey = rollClass(tier, rng);
+    let corePassives = rollCorePassives(classKey, rng);
+    // One rare bonus slot per tier the class sits below the applicant's tier. Vagabond's Compass
+    // can curse them; five curses empty the applicant out into an Empty Vessel.
+    const {bonuses, curses} = rollBonuses(Math.max(0, tier - classes[classKey].tier), rng, trophyTotal(state, 'curseChance'));
+    const vessel = curseCount({curses}) >= VESSEL_CURSES;
+    if (vessel) {
+        classKey = 'emptyVessel';
+        corePassives = undefined;
+    }
     const bestLevel = Math.max(1, ...state.adventurers.map(a => a.level));
     const cap = Math.max(1, Math.min(START_LEVEL_CAP[tier], Math.floor(bestLevel / 2)));
     const level = 1 + Math.floor(rng() * cap);
     const names = classes[classKey].names.filter(n => !taken.has(n));
     const name = names.length ? pick(names, rng) : `${pick(classes[classKey].names, rng)} ${state.nextId}`;
     taken.add(name);
-    const applicant: Applicant = {id: 'app' + state.nextId++, name, classKey, level, tier, fee: HIRE_FEES[tier], ambitions: rollAmbitions(tier, classKey, rng, level, corePassives?.map(p => p.key))};
+    const applicant: Applicant = {id: 'app' + state.nextId++, name, classKey, level, tier, fee: HIRE_FEES[tier], ambitions: vessel ? [vesselAmbition(tier)] : rollAmbitions(tier, classKey, rng, level, corePassives?.map(p => p.key))};
     if (corePassives) applicant.passives = corePassives;
     if (Object.keys(bonuses).length) applicant.bonuses = bonuses;
+    if (Object.keys(curses).length) applicant.curses = curses;
     return applicant;
 }
 
@@ -313,9 +355,10 @@ export function refreshApplicants(state: GameState): boolean {
 
 // Existing adventurers from before ambitions get a set at the guild's current tier.
 export function giveAmbitions(state: GameState, adventurer: Adventurer) {
-    adventurer.ambitions ??= rollAmbitions(guildTier(state), adventurer.classKey, Math.random, adventurer.level);
+    adventurer.ambitions ??= rollAmbitions(guildTier(state), adventurer.classKey, Math.random, adventurer.level, adventurer.passives?.map(p => p.key));
+    replaceUnreachableAmbitions(adventurer);
     // Older saves rolled level ambitions up to 100; they cap at MAX_LEVEL_AMBITION now.
-    for (const a of adventurer.ambitions) if (a.kind === 'level' && a.target > MAX_LEVEL_AMBITION) a.target = MAX_LEVEL_AMBITION;
+    if (adventurer.classKey !== 'emptyVessel') for (const a of adventurer.ambitions) if (a.kind === 'level' && a.target > MAX_LEVEL_AMBITION) a.target = MAX_LEVEL_AMBITION;
     adventurer.records ??= emptyRecords();
 }
 

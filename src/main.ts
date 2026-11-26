@@ -10,19 +10,20 @@ import {clearSave, exportSave, importSave, loadGame, saveGame} from './engine/sa
 import {addMaterial, checkProgress, nextExpansion, createNewGame, getQuestProgress, isModifierUnlocked, isQuestCleared, isQuestUnlocked} from './engine/state';
 import {getCachedStats, invalidateStats, levelCap, totalXpForLevel} from './engine/stats';
 import type {Adventurer, GameState, QuestDef, Tier} from './engine/types';
-import {adoptHandlers, h, svg, type Listened} from './ui/dom';
+import {adoptHandlers, h, shortNumber, svg, type Listened} from './ui/dom';
 import {heroPortrait} from './ui/portraits';
 import {exportBuild} from './engine/buildExport';
 import {classIcon, materialIcon} from './ui/icons';
 import {renderMaterialDetail} from './ui/materialDetail';
-import {tierNames, trophies, trophyList} from './data/trophies';
+import {trophies, trophyList, trophyTierName} from './data/trophies';
 import {salvageLevel, salvageVisible} from './engine/salvage';
 import {BENCH_PRICE, hasBench, setHoldLevelRestock} from './engine/shop';
 import {portalSecondsLeft} from './engine/portal';
 import {peddlerHere, peddlerUnlocked, updatePeddler} from './engine/peddler';
 import {installTextures} from './ui/textures';
+import {guildHallSizes} from './ui/guildSizes';
 import {decoUrl, GROUND, mapGroundUrl, MOUNTAINS, BUSHES, ROCKS, SEA_X, siteArtUrl, SMALL, TREES} from './ui/mapArt';
-import {activityText, clock, contractsOpen, selectHero, openGuildSection, renderBenchCompare, renderBenchPanel, renderGearPanel, renderPanel, renderPickerPanel, renderRecapPanel, renderRunPanel, renderRunStrip, renderStarterPick, type Ctx, type UiState} from './ui/panels';
+import {activityText, clearFlag, heroCleared, clock, contractsOpen, selectHero, openGuildSection, renderBenchCompare, renderBenchPanel, renderGearPanel, renderPanel, renderPickerPanel, renderRecapPanel, renderRunPanel, renderRunStrip, renderStarterPick, type Ctx, type UiState} from './ui/panels';
 
 const glyphs = {
     guild: '<svg viewBox="0 0 32 32"><path d="M5 15 16 6l11 9"/><path d="M8 13v13h16V13"/><path d="M13 26v-7h6v7"/><path d="M16 6V2l5 1.5L16 5"/></svg>',
@@ -524,18 +525,6 @@ function updateHudNumbers() {
         if (el.title !== full) el.title = text === String(Math.floor(n)) ? '' : full;
     }
 }
-// At most 6 characters: whole numbers up to 999999, then 3 significant digits with a suffix
-// (1.23M, 12.3M, 123M, then B, T, Qa). Rounds down so it never shows more than there is.
-function shortNumber(n: number): string {
-    const v = Math.floor(n);
-    if (v < 1e6) return String(v);
-    const units = ['M', 'B', 'T', 'Qa'];
-    let i = 0, x = v / 1e6;
-    while (x >= 1000 && i < units.length - 1) { x /= 1000; i++; }
-    const s = x < 10 ? (Math.floor(x * 100) / 100).toFixed(2) : x < 100 ? (Math.floor(x * 10) / 10).toFixed(1) : String(Math.floor(x));
-    return s + units[i];
-}
-
 // ---------------- Map ----------------
 
 // One token per adventurer, rebuilt when someone joins.
@@ -611,7 +600,7 @@ function buildMap() {
     const terrainEl = svg(`<svg class="terrain" viewBox="0 0 ${MAP_W} ${MAP_H}" width="${MAP_W}" height="${MAP_H}">${terrainArt()}${ROAD_DEFS}<g class="trails" filter="url(#road-rough)">${trailLayers(paths)}</g></svg>`);
     const roadEl = svg(`<svg class="roads" viewBox="0 0 ${MAP_W} ${MAP_H}" width="${MAP_W}" height="${MAP_H}">${paths}</svg>`);
     const guild = guildSiteEl = h('button', {class: 'site', 'data-key': 'guild', style: pos(sites.guild) + `;--site:${siteColors.guild}`, onclick: () => openPanel({kind: 'guild'})},
-        siteGlyph('guild', glyphs.guild),
+        guildGlyph(),
         h('div', {class: 'name'}, 'Guild hall'),
         h('div', {class: 'sub'}, 'Members and ledger'),
     );
@@ -662,6 +651,24 @@ function buildMap() {
 function siteGlyph(key: string, glyph: string): HTMLElement {
     const url = siteArtUrl(key);
     return url ? h('div', {class: 'glyph art'}, h('img', {src: url, alt: '', draggable: 'false'})) : h('div', {class: 'glyph'}, svg(glyph));
+}
+
+// The guild hall grows with each Guild Expansion: guild-0 (a rundown shack) to guild-9 (a palace);
+// guild-5 is the original hall. Sprites share one scale (GUILD_ART_SCALE: expansion 5 fills the
+// usual 88px site height) and stand on the site's bottom edge, so bigger halls rise above it.
+const GUILD_ART_SCALE = 88 / guildHallSizes[5][1];
+let builtExpansion = -1;
+function guildGlyph(): HTMLElement {
+    const level = Math.max(0, Math.min(guildHallSizes.length - 1, state.expansion ?? 0));
+    builtExpansion = state.expansion ?? 0;
+    const url = siteArtUrl(`guild-${level}`) ?? siteArtUrl('guild');
+    const [w, hgt] = guildHallSizes[level];
+    return url ? h('div', {class: 'glyph art guildart'}, h('img', {src: url, alt: '', draggable: 'false', style: `width:${Math.round(w * GUILD_ART_SCALE)}px;height:${Math.round(hgt * GUILD_ART_SCALE)}px`})) : siteGlyph('guild', glyphs.guild);
+}
+
+function withFlag(glyph: HTMLElement, hero: Adventurer | undefined): HTMLElement {
+    if (hero) glyph.append(clearFlag(hero));
+    return glyph;
 }
 
 function lockText(quest: QuestDef): string {
@@ -1018,14 +1025,26 @@ canvas.addEventListener('click', event => {
 function spot(p: {x: number, y: number}, dx: number, row: number) {
     return {x: p.x + dx, y: p.y - 20 + row * 66};
 }
-function placeOf(hero: GameState['adventurers'][number]): string {
+// Where each hero's map token stands. A hero stays at their quest until they're no longer assigned
+// to it: resting between runs (faded while recovering) and setting out again don't walk them home.
+// The battle view still shows the rest at the guild.
+const mapPlace = new Map<string, string>();
+type MapSpot = {place: string, travel: boolean, faded: boolean};
+function mapSpotOf(hero: GameState['adventurers'][number]): MapSpot {
     const a = hero.activity;
-    // Resting before a boss or bonus fight happens on site: the fight starts there with no travel.
-    if (a.kind === 'resting' && !a.defeated && pendingExtraFight(hero)) return a.questKey;
-    return a.kind === 'fighting' || a.kind === 'traveling' ? a.questKey : 'home';
-}
-function slotAt(place: string, index: number): number {
-    return state.adventurers.slice(0, index).filter(o => placeOf(o) === place || place === 'home' && o.activity.kind === 'traveling').length;
+    const assigned = hero.assignment?.questKey;
+    const last = mapPlace.get(hero.id);
+    if (a.kind === 'fighting') return {place: a.questKey, travel: false, faded: false};
+    // Setting out again from where the token already stands: no walk from the guild.
+    if (a.kind === 'traveling') return last === a.questKey ? {place: a.questKey, travel: false, faded: false} : {place: a.questKey, travel: true, faded: false};
+    if (a.kind === 'resting') {
+        // Resting on site before a boss or bonus fight.
+        if (!a.defeated && pendingExtraFight(hero)) return {place: a.questKey, travel: false, faded: false};
+        if (assigned === a.questKey) return {place: a.questKey, travel: false, faded: true};
+    }
+    // Assigned but held back (an entry fee it can't pay): it waits where it stands.
+    if (a.kind === 'idle' && assigned && last === assigned) return {place: assigned, travel: false, faded: true};
+    return {place: 'home', travel: false, faded: false};
 }
 
 let builtWithSalvage = false;
@@ -1033,7 +1052,7 @@ let builtReveal = '';
 let builtWithBench = false;
 function updateMap() {
     const reveal = mapRevealKey();
-    if (tokenEls.length !== state.adventurers.length || builtWithSalvage !== salvageVisible(state) || builtWithBench !== hasBench(state) || builtReveal !== reveal) {
+    if (tokenEls.length !== state.adventurers.length || builtWithSalvage !== salvageVisible(state) || builtWithBench !== hasBench(state) || builtReveal !== reveal || builtExpansion !== (state.expansion ?? 0)) {
         builtWithSalvage = salvageVisible(state);
         builtWithBench = hasBench(state);
         builtReveal = reveal;
@@ -1072,11 +1091,13 @@ function updateMap() {
         // The pulse class is kept, and the contents are rebuilt only when they change, so a guidance
         // pulse on the glyph runs on smoothly.
         el.className = 'site' + (unlocked ? '' : ' locked') + (ui.panel?.kind === 'quest' && ui.panel.key === key ? ' open' : '') + (el.classList.contains('pulse') ? ' pulse' : '');
-        const sig = [unlocked, quest.portal && unlocked ? clock(portalSecondsLeft(state)) : '', progress.bestEncounter, [...fightingAt].join(), unlocked ? '' : lockText(quest)].join('|');
+        const viewer = state.adventurers.find(a => a.id === ui.hero) ?? state.adventurers[0];
+        const cleared = unlocked && heroCleared(viewer, key);
+        const sig = [unlocked, cleared, viewer?.id, quest.portal && unlocked ? clock(portalSecondsLeft(state)) : '', progress.bestEncounter, [...fightingAt].join(), unlocked ? '' : lockText(quest)].join('|');
         if (el.dataset.sig === sig) continue;
         el.dataset.sig = sig;
         el.replaceChildren(
-            siteGlyph(unlocked ? key : 'locked', unlocked ? questLooks[key]?.glyph ?? glyphs.quest : glyphs.lock),
+            withFlag(siteGlyph(unlocked ? key : 'locked', unlocked ? questLooks[key]?.glyph ?? glyphs.quest : glyphs.lock), cleared ? viewer : undefined),
             h('div', {class: 'name'}, quest.name),
             ...(quest.portal && unlocked ? [h('div', {class: 'sub'}, `Portal open · ${clock(portalSecondsLeft(state))}`)] : []),
             unlocked
@@ -1084,8 +1105,13 @@ function updateMap() {
                 : h('div', {class: 'sub'}, lockText(quest)),
         );
     }
+    const spots = state.adventurers.map(mapSpotOf);
+    // Heroes at the same spot stack in a column; travelers keep their slot at the guild.
+    const slotAt = (place: string, index: number) => spots.slice(0, index).filter(o => place === 'home' ? o.place === 'home' || o.travel : o.place === place).length;
     state.adventurers.forEach((hero, index) => {
         const tokenEl = tokenEls[index];
+        const where = spots[index];
+        mapPlace.set(hero.id, where.travel ? 'travel' : where.place);
         // Stand left of a quest while fighting (or resting there before a boss or bonus fight), and right
         // of the guild hall while resting or idle.
         // Heroes at the same spot stack in a column. Travel walks between the two.
@@ -1093,13 +1119,14 @@ function updateMap() {
         const questSpot = (key: string) => spot(quests[key].mapPosition, -95, slotAt(key, index));
         const a = hero.activity;
         let at = home;
-        if (placeOf(hero) !== 'home' && a.kind !== 'traveling') {
-            at = questSpot(placeOf(hero));
+        if (where.place !== 'home' && !where.travel) {
+            at = questSpot(where.place);
         } else if (a.kind === 'traveling') {
             const to = questSpot(a.questKey), t = Math.min(1, 1 - a.remaining / a.total);
             at = {x: home.x + (to.x - home.x) * t, y: home.y + (to.y - home.y) * t};
         }
         tokenEl.classList.toggle('selected', hero.id === (ui.hero ?? state.adventurers[0]?.id));
+        tokenEl.classList.toggle('recovering', where.faded);
         tokenEl.style.left = `${at.x}px`;
         tokenEl.style.top = `${at.y}px`;
         const stats = getCachedStats(state, hero);
@@ -1349,6 +1376,18 @@ function placeCompare() {
 }
 
 function renderPanelNow() {
+    // A focused search box (the material ledger's) can be rebuilt with its panel: put the focus and
+    // caret back on the new one, so typing carries on.
+    const active = document.activeElement as HTMLInputElement | null;
+    const typing = active?.matches?.('.panel input[type="search"]') ? {cls: active.className, start: active.selectionStart, end: active.selectionEnd} : null;
+    renderPanelsInner();
+    if (typing && !active!.isConnected) {
+        const again = document.querySelector<HTMLInputElement>(`.panel input[type="search"].${typing.cls.split(' ')[0]}`);
+        again?.focus({preventScroll: true});
+        if (again && typing.start !== null) again.setSelectionRange(typing.start, typing.end);
+    }
+}
+function renderPanelsInner() {
     ui.compareBeside = !isNarrow();
     benchEl = swapPanel(benchEl, renderBenchPanel(ctx), el => map.insertBefore(el, world));
     pickerEl = swapPanel(pickerEl, renderPickerPanel(ctx), el => map.insertBefore(el, world));
@@ -1516,7 +1555,7 @@ function guideFocusKey(t: GuideTarget | null): string | null {
 }
 // A trophy is waiting for its first slot: the guild site and the trophy slots pulse alongside any other step.
 function trophyWaiting(): boolean {
-    return Object.keys(state.trophies ?? {}).length > 0 && (state.guild.trophySlots ?? 0) > 0 && !anyTrophyEquipped();
+    return Object.keys(state.trophies ?? {}).some(k => trophies[k]?.kind !== 'endless') && (state.guild.trophySlots ?? 0) > 0 && !anyTrophyEquipped();
 }
 let focusedSite: string | null = null;
 // Brings a pulsing map site into view: centered across, a quarter of the way down.
@@ -1790,18 +1829,26 @@ function renderDrops() {
                 const equipped = (state.trophySlots ?? []).includes(t.trophy.key);
                 // The first trophy's card stays until one is equipped and points at the guild hall instead
                 // of opening it, so the player learns where trophies go.
+                if (def.kind === 'endless') {
+                    return h('button', {class: `dropcard trophycard tier${t.trophy.tier}`, onclick: () => equipFromCard(t)},
+                        h('div', {class: 'dropkicker'}, `Banner earned · +${t.trophy.fame} fame`),
+                        h('div', {class: 'dropname'}, `${def.name} · ${trophyTierName(def, t.trophy.tier)}`),
+                        h('div', {class: 'small muted tbonus'}, def.bonusText(def.tiers[t.trophy.tier].bonus)),
+                        h('div', {class: 'small muted'}, 'Always in effect'),
+                        h('div', {class: 'row', style: 'margin-top:4px'}, h('span', {class: 'btn small primary'}, 'See banners')));
+                }
                 if (t.expires === Infinity) {
                     return h('div', {class: `dropcard trophycard tier${t.trophy.tier}`},
                         h('div', {class: 'dropkicker'}, `Trophy earned · +${t.trophy.fame} fame`),
-                        h('div', {class: 'dropname'}, `${def.name} · ${tierNames[t.trophy.tier]}`),
-                        h('div', {class: 'small muted'}, `${def.bonusText(def.tiers[t.trophy.tier].bonus)} while equipped`),
+                        h('div', {class: 'dropname'}, `${def.name} · ${trophyTierName(def, t.trophy.tier)}`),
+                        h('div', {class: 'small muted tbonus'}, def.bonusText(def.tiers[t.trophy.tier].bonus)),
                         h('div', {class: 'small', style: 'margin-top:4px'}, 'Open the guild hall on the map and put it in a trophy slot.'),
                     );
                 }
                 return h('button', {class: `dropcard trophycard tier${t.trophy.tier}`, onclick: () => equipFromCard(t)},
                     h('div', {class: 'dropkicker'}, `Trophy earned · +${t.trophy.fame} fame`),
-                    h('div', {class: 'dropname'}, `${def.name} · ${tierNames[t.trophy.tier]}`),
-                    h('div', {class: 'small muted'}, `${def.bonusText(def.tiers[t.trophy.tier].bonus)} while equipped`),
+                    h('div', {class: 'dropname'}, `${def.name} · ${trophyTierName(def, t.trophy.tier)}`),
+                    h('div', {class: 'small muted tbonus'}, def.bonusText(def.tiers[t.trophy.tier].bonus)),
                     h('div', {class: 'row', style: 'margin-top:4px'}, h('span', {class: 'btn small primary'}, equipped ? 'See trophies' : 'Equip')),
                 );
             }
@@ -1931,7 +1978,7 @@ function announceUnlocks() {
         // Only the highest new tier of each trophy gets a card.
         dropToasts = dropToasts.filter(x => x.trophy?.key !== t.key);
         // Until a trophy is equipped for the first time, the card stays until one is.
-        const sticky = !anyTrophyEquipped();
+        const sticky = !anyTrophyEquipped() && trophies[t.key]?.kind !== 'endless';
         dropToasts.push({id: dropToastId++, kind: 'trophy', trophy: {key: t.key, tier: t.tier, fame: t.fame}, material: '', tier: 'C', questKey: '', owned: 0, expires: sticky ? Infinity : performance.now() + 10000});
     }
     if (progress.trophies.length) renderDrops();
@@ -1958,6 +2005,59 @@ function detailOpen(): boolean {
     // An open native select closes when its element is rebuilt, so hold refreshes while one has focus.
     return !!hoveredDelta || !!(focused?.closest('.delta') && focused.matches(':focus-visible')) || !!focused?.matches('select.filteradd');
 }
+
+// The comparison detail floats in one fixed element on the body, outside every panel and scroll box, so it
+// never grows a list's scroll height (no flicker at the bottom of a list) and is never clipped by a details
+// panel. It sits below its line, flips above when it would run off the bottom, and is clamped to the screen.
+const deltaTip = document.createElement('div');
+deltaTip.className = 'delta-detail delta-tip';
+deltaTip.setAttribute('role', 'tooltip');
+deltaTip.hidden = true;
+document.body.append(deltaTip);
+let tipFor: Element | null = null;
+let tipFrame = 0;
+function tipTarget(): Element | null {
+    const hovered = hoveredDelta?.isConnected && !hoveredDelta.matches('.static') ? hoveredDelta : null;
+    if (hovered) return hovered;
+    const focused = document.activeElement;
+    const line = focused?.closest('.delta:not(.static)');
+    return line && focused!.matches(':focus-visible') ? line : null;
+}
+function placeTip(line: Element): boolean {
+    const r = line.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth, vh = window.innerHeight, m = 8;
+    if (r.bottom < 0 || r.top > vh || (r.width === 0 && r.height === 0)) return false;
+    const w = deltaTip.offsetWidth, ht = deltaTip.offsetHeight;
+    let top = r.bottom + 4;
+    if (top + ht > vh - m && r.top - 4 - ht >= m) top = r.top - 4 - ht;
+    top = Math.max(m, Math.min(top, vh - m - ht));
+    const left = Math.max(m, Math.min(r.left, vw - m - w));
+    deltaTip.style.top = `${Math.round(top)}px`;
+    deltaTip.style.left = `${Math.round(left)}px`;
+    return true;
+}
+function updateTip(): void {
+    const line = tipTarget();
+    const detail = line?.querySelector(':scope > .delta-detail');
+    if (!line || !detail) {
+        tipFor = null;
+        deltaTip.hidden = true;
+        return;
+    }
+    if (line !== tipFor) {
+        tipFor = line;
+        deltaTip.replaceChildren(...Array.from(detail.childNodes, n => n.cloneNode(true)));
+        deltaTip.style.top = deltaTip.style.left = '0px';
+        deltaTip.hidden = false;
+    }
+    deltaTip.hidden = !placeTip(line);
+    // Follow the line while it shows (scrolling, layout shifts), and close when it leaves the page.
+    if (!tipFrame) tipFrame = requestAnimationFrame(() => { tipFrame = 0; if (tipFor) updateTip(); });
+}
+document.addEventListener('mouseover', updateTip);
+document.addEventListener('mouseleave', () => { hoveredDelta = null; updateTip(); });
+document.addEventListener('focusin', () => requestAnimationFrame(updateTip));
+document.addEventListener('focusout', () => requestAnimationFrame(updateTip));
 
 let pointerDown = false;
 document.addEventListener('pointerdown', () => { pointerDown = true; }, true);

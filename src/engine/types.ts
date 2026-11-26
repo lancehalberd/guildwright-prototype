@@ -20,7 +20,13 @@ export type StatKey =
     | 'increasedDamage' | 'increasedPhysicalDamage' | 'increasedElementalDamage'
     | 'attackSpeed' | 'accuracy' | 'critChance' | 'critMultiplier'
     | 'igniteChance' | 'chillChance' | 'shockChance' | 'ailmentEffect'
-    | 'wardOnDodge' | 'wardOnDodgePercent' | 'wardOnBlock' | 'wardOnBlockPercent';
+    | 'wardOnDodge' | 'wardOnDodgePercent' | 'wardOnBlock' | 'wardOnBlockPercent'
+    // Trophy-only stats (data/trophies.ts): no material carries these.
+    | 'increasedStr' | 'increasedDex' | 'increasedInt' | 'increasedAccuracy' | 'increasedWard'
+    | 'dodgeChance' | 'maxBlockChance' | 'maxFireResist' | 'maxColdResist' | 'maxLightningResist'
+    | 'reducedAilmentEffectTaken' | 'avoidAilmentChance' | 'increasedAilmentChance' | 'increasedAilmentLimits'
+    | 'increasedRecovery' | 'lessDamageTaken' | 'lessElementalDamageTaken' | 'reducedReflectedDamageTaken'
+    | 'reducedDamageOverTimeTaken' | 'moreDamage' | 'corePassiveEffect';
 
 // A bag of stats. Items, decorations and gear totals are all plain sums of these.
 export type StatValues = Partial<Record<StatKey, number>>;
@@ -82,6 +88,8 @@ export interface RewardBonuses {
     bonusRareChance?: number
     // Multiplies gold and XP. Multiplies across sources.
     goldXpMultiplier?: number
+    // Increased chance for each dropped unit to be premium (Endless trial, Void, curses).
+    premiumChance?: number
 }
 
 export type MonsterModStat = 'hp' | 'damage' | 'armor' | 'accuracy' | 'evasion' | 'attacksPerSecond';
@@ -334,6 +342,8 @@ export interface ClassDef {
     growth: Record<CoreStat, number>
     // 'enhanced': rolls one random core passive, enhanced. 'wildcard': rolls three random core passives.
     special?: 'enhanced' | 'wildcard'
+    // Never offered as a class roll (the Empty Vessel).
+    hidden?: boolean
 }
 
 // Core passives a hero has, when rolled at hire rather than taken from the class.
@@ -461,6 +471,10 @@ export interface Adventurer {
     passives?: HeroPassive[]
     // Rare bonus passives rolled at hire: stacks of +10% per bonus.
     bonuses?: Partial<Record<BonusKey, number>>
+    // Cursed rare bonuses (Vagabond's Compass): -20% each, and +100% premium drop chance each, to 400%.
+    curses?: Partial<Record<BonusKey, number>>
+    // Endless trial level picked per quest (see runner trialLevel).
+    trials?: Record<string, number>
 }
 
 export type AmbitionKind = 'level' | 'endless' | 'bigHit' | 'chain' | 'multiKill' | 'clearMods' | 'bareClear' | 'boss';
@@ -512,6 +526,7 @@ export interface Applicant {
     passives?: HeroPassive[]
     // Rare bonus passives: stacks of +10% per bonus.
     bonuses?: Partial<Record<BonusKey, number>>
+    curses?: Partial<Record<BonusKey, number>>
 }
 
 // A retired adventurer, kept in the Hall of Legends.
@@ -526,6 +541,8 @@ export interface Legend {
 
 export interface RunRecord {
     questKey: string
+    // Challenges this run took on (Endless trial 'trial:N', 'void'); see runner fightKeys.
+    challenge?: string[]
     // Which run of this quest this is for this adventurer, counting from 1.
     number: number
     // Last encounter index cleared this run (-1 = none yet).
@@ -554,6 +571,9 @@ export interface RunRecord {
     // Area rule stacks, kept for the whole run.
     corrosion?: number
     karma?: number
+    // A full clear waiting on this run's extra fights (rite, ambition boss, bonus rare): it counts
+    // for trophies, contracts and records only once those are won too.
+    clearPending?: boolean
 }
 
 export interface RunStats {

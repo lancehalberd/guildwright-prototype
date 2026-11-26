@@ -6,15 +6,17 @@ import {classIcon, itemArt, itemTypeArt, itemTypeIcon, materialIcon, monsterIcon
 import {fightLayout, monsterArtUrl} from './monsterArt';
 import {itemTypeOrder, itemTypes, slotNames, slotOrder} from '../data/items';
 import {isPremium, materialOrder, requireMaterial, roleLabel} from '../data/materials';
-import {ACCURACY_GROWTH, classPassive, damageStats, questXpLevel, classes, encounterLevel, encounterPower, ENDLESS_GROWTH, ENDLESS_PATTERN, ENDLESS_STEP, xpMultiplier, endlessKey, EVASION_GROWTH, monsterBaseline, monsters, questOrder, quests, unlockMet, unlockQuestNames} from '../data/quests';
+import {ACCURACY_GROWTH, classPassive, damageStats, questXpLevel, classes, encounterLevel, encounterPower, ENDLESS_GROWTH, ENDLESS_PATTERN, ENDLESS_STEP, xpMultiplier, endlessKey, powerForLevel, EVASION_GROWTH, monsterBaseline, monsters, questOrder, quests, unlockMet, unlockQuestNames} from '../data/quests';
 import {kitHit, monsterKit} from '../engine/abilities';
 import {itemStatRound, craftItem, DECORATION_TIER_LEAD, maxDecorationPower, getBaseLimit, getDecorationLimit, isAccessory, getBaseStats, getCraftedItemStats, getDecorationStats, getSellValue, previewCraft, decorationScale, statScale} from '../engine/crafting';
 import {baseStatEntries, CAP_RULE, elements, resistStat, familyLabel, formatStat, formatStats, formatStatValue, roundStat, statDefs, statFamily, statOrder} from '../data/stats';
-import {assignQuest, encounterLineup, fightStats, pendingExtraFight, getAutoRecoverBudget, getEntryFee, getMonsterStats, getRecoverCost, typicalAttack, getRewardBonuses, recall, recoverInstantly, restSpeed, runOutcome, setStopAt, MONSTER_RESIST_CAP, REFLECT_SOURCE} from '../engine/runner';
+import {assignQuest, challengeKeys, trialLevel, trialMax, encounterLineup, fightStats, pendingExtraFight, getAutoRecoverBudget, getEntryFee, getMonsterStats, getRecoverCost, typicalAttack, getRewardBonuses, recall, recoverInstantly, restSpeed, runOutcome, setStopAt, MONSTER_RESIST_CAP, REFLECT_SOURCE} from '../engine/runner';
 import {canEquipInSlot, canHire, chooseStarter, equip, equipTrophy, itemLevelRequirement, levelForPower, retireAdventurer, getActiveModifiers, getQuestProgress, hireApplicant, isQuestCleared, isItemEquipped, isModifierUnlocked, isQuestUnlocked, modifierUnlockText, buySlot, expandGuild, nextExpansion, nextSlot, sellItem, setActiveModifiers, unequip} from '../engine/state';
 import {formatMod} from '../engine/mods';
 import {expansions, slotUnlocks, trackNames, unlockFame, type SlotTrack} from '../data/milestones';
-import {earnedText, MAX_TROPHY_SLOTS, tierFor, tierNames as trophyTierNames, trophies, trophyList, type TrophyDef} from '../data/trophies';
+import {earnedText, equippedBonuses, MAX_TROPHY_SLOTS, tierFor, trophies, trophyList, trophyTierName, type TrophyDef} from '../data/trophies';
+import {challengeModifier, TRIAL_MONSTER, TRIAL_PREMIUM, TRIAL_STEP, VOID_KEY, VOID_MONSTER, VOID_PREMIUM} from '../data/modifiers';
+import {trophyBanner, trophyCase, trophyLabel} from './trophyArt';
 import {BLOCK_CAP, expectedCritMultiplier, expectedHits, getCachedStats, hitChance, hitRating, mitigateHit, resolveItemRef, RESIST_CAP, totalXpForLevel} from '../engine/stats';
 import type {Adventurer, BaseStats, CraftedItem, MaterialDef, DamageMap, DamageType, GameState, ItemRef, ItemStats, ItemTypeKey, ModValue, MonsterModStat, QuestDef, QuestModifierDef, RewardBonuses, RunStats, SlotKey, StatKey, Tier} from '../engine/types';
 import {fmt, h, num, type Listened} from './dom';
@@ -25,7 +27,7 @@ import {BENCH_PRICE, buyBench, buyShopItem, hasBench, refreshShop, restockSold, 
 import {APPLICANT_SLOTS, THIRD_APPLICANT_EXPANSION, applicantSlotFame, applicantSlots, ambitionHint, ambitionProgress, ambitionText, ambitionTierNames, applicantTierOdds, ensureApplicants, guildTier, TIER_FAME, tierStartFame, refreshApplicants, refreshCost, RETIRE_MULTIPLIER, retireFame} from '../engine/ambitions';
 import {contractHolder, contractRewardText, contractText, dropContract, ensureGuildContracts, ensurePersonalContract, findContract, grantedModifiers, guildRefreshCost, personalRefreshCost, refreshGuildContract, refreshPersonalContract, takeContract} from '../engine/contracts';
 import type {Ambition, Applicant, Contract, HeroPassive} from '../engine/types';
-import {bloodPactBonus, bonusText as rareBonusText, passiveLevel, passives as passiveDefs, type BonusKey} from '../data/passives';
+import {bloodPactBonus, bonusText as rareBonusText, cursePremium, curseText, passiveScale, passives as passiveDefs, type BonusKey, type PassiveKey} from '../data/passives';
 import {buyOffer, HOLD_BASE, holdCost, holdOffer, offerPrice, PEDDLER_UNLOCK, peddlerHere, RARE_FOUND, releaseOffer, VISIT_GAP, VISIT_SECONDS} from '../engine/peddler';
 import {corrosionFactor, REFLECT_SHARE, ruleInfo} from '../engine/rules';
 import {PORTAL_SECONDS, portalSecondsLeft} from '../engine/portal';
@@ -63,6 +65,8 @@ export interface UiState {
     confirmRetire?: string | null
     // Trophy slot whose picker is open.
     trophyPick?: number | null
+    // Material ledger search in the guild panel (substring of the name, any case). Cleared when the guild panel closes.
+    ledgerFilter?: string
     // Bench stat filters: stat families. Materials, item types and crafted items with any of them stay in view.
     statFilters?: string[]
     // Element id in the open panel to scroll to and highlight once.
@@ -199,6 +203,7 @@ function showRun(ui: UiState, id: string, sent?: GameState) {
 
 export function renderPanel(ctx: Ctx): HTMLElement | null {
     const panel = ctx.ui.panel;
+    if (panel?.kind !== 'guild') ctx.ui.ledgerFilter = '';
     if (!panel) {
         return null;
     }
@@ -421,9 +426,9 @@ function adventurerPanel(ctx: Ctx, adventurer: Adventurer): HTMLElement {
             statRow('Life on hit', fmt(stats.lifeOnHit, 1)),
             statRow('Full rest', `${fmt(15 / restSpeed(stats.maxHealth, stats.lifeRegen, adventurer.level), 1)}s`),
             ...(() => {
-                const level = passiveLevel(adventurer, 'bloodPact', classPassive);
-                if (!level) return [];
-                const row = statRow('Blood pact damage', `+${fmt(100 * bloodPactBonus(level, stats.lifeRegen))}%`);
+                const scale = stats.passiveScale.bloodPact ?? 0;
+                if (!scale) return [];
+                const row = statRow('Blood pact damage', `+${fmt(100 * bloodPactBonus(scale, stats.lifeRegen))}%`);
                 row.title = `From ${fmt(stats.lifeRegen, 1)} HP regenerated per second. Leech healing over time adds to it in a fight.`;
                 return [row];
             })(),
@@ -485,7 +490,7 @@ function adventurerPanel(ctx: Ctx, adventurer: Adventurer): HTMLElement {
         ),
     );
 
-    const passive = heroPassives(adventurer.classKey, adventurer.passives, adventurer.bonuses, 'passive small');
+    const passive = heroPassives(adventurer, 'passive small', state);
     const ambitions = adventurer.ambitions ?? [];
     const doneCount = ambitions.filter(a => a.done).length;
     const ambitionSection = ambitions.length ? h('div', null,
@@ -1028,11 +1033,14 @@ function trophyPicker(ctx: Ctx): HTMLElement | null {
     const picking = ui.trophyPick;
     const slots = state.guild.trophySlots ?? 0;
     if (picking === null || picking === undefined || picking >= slots) return null;
-    const earned = trophyList.filter(def => (state.trophies?.[def.key] ?? -1) >= 0);
+    const earned = trophyList.filter(def => def.kind !== 'endless' && (state.trophies?.[def.key] ?? -1) >= 0);
     const equipped = state.trophySlots ?? [];
     const close = () => { ui.trophyPick = null; };
-    return pickerShell(ctx, `Trophy slot ${picking + 1}`, 'Its bonus applies to every member while it sits in a slot.', 'Trophy picker', close,
-        earned.length ? h('div', {class: 'list'},
+    const shell = pickerShell(ctx, `Trophy slot ${picking + 1}`, 'Its bonus applies to every member while it sits in a slot.', 'Trophy picker', close,
+        earned.length ? h('div', {class: 'list trophypicklist'},
+            equipped[picking] ? h('button', {class: 'item emptyslot', onclick: () => { equipTrophy(state, picking, null); close(); ctx.refresh(); }},
+                h('span', {class: 'tpick-art'}, trophyCase(undefined, 0)),
+                h('span', {class: 'grow'}, h('div', {class: 'tname'}, 'Empty this slot'))) : null,
             ...earned.map(def => {
                 const tier = state.trophies![def.key];
                 const at = equipped.indexOf(def.key);
@@ -1041,15 +1049,16 @@ function trophyPicker(ctx: Ctx): HTMLElement | null {
                     'data-guide': 'trophy',
                     title: at >= 0 && at !== picking ? `Already in slot ${at + 1}. Choosing it moves it here.` : undefined,
                     onclick: () => { equipTrophy(state, picking, def.key); close(); ctx.refresh(); },
-                }, h('span', {class: 'grow'},
-                    h('div', null, trophyTierLabel(def, tier), at === picking ? h('span', {class: 'usedtag'}, ' In this slot') : at >= 0 ? h('span', {class: 'usedtag'}, ` In slot ${at + 1} · moves here`) : null),
-                    h('div', {class: 'mods'}, def.bonusText(def.tiers[tier].bonus)),
-                    h('div', {class: 'mods muted'}, `Earned: ${earnedText(def, tier)}`)));
+                }, h('span', {class: 'tpick-art'}, trophyCase(def, tier)), h('span', {class: 'grow'},
+                    h('div', {class: 'tname'}, def.name),
+                    h('div', {class: 'small ttier tier' + tier}, trophyTierName(def, tier), at === picking ? h('span', {class: 'usedtag'}, ' In this slot') : at >= 0 ? h('span', {class: 'usedtag'}, ` In slot ${at + 1} · moves here`) : null),
+                    h('div', {class: 'mods tbonus'}, def.bonusText(def.tiers[tier].bonus)),
+                    h('div', {class: 'mods muted'}, earnedText(def, tier))));
             }),
         ) : h('p', {class: 'muted small'}, 'No trophies earned yet.'),
-        equipped[picking] ? h('div', {class: 'row', style: 'margin-top:8px'},
-            h('button', {class: 'btn small', onclick: () => { equipTrophy(state, picking, null); close(); ctx.refresh(); }}, 'Empty this slot')) : null,
     );
+    shell.classList.add('trophypick');
+    return shell;
 }
 
 export function renderGearPanel(ctx: Ctx): HTMLElement | null {
@@ -1462,7 +1471,8 @@ function questPanel(ctx: Ctx, questKey: string): HTMLElement {
     const progress = getQuestProgress(state, questKey);
     const unlocked = isQuestUnlocked(state, questKey);
     const hero = currentHero(ctx)!;
-    const heroMods = getActiveModifiers(state, hero, quest);
+    // The hero's modifiers plus the challenges their run takes on (Endless trial, the Void).
+    const heroMods = [...getActiveModifiers(state, hero, quest), ...challengeKeys(state, hero, quest)];
     // A hidden legendary slot can't stay selected (an older view may have picked it).
     const bossKnown = !!quest.boss && (!!progress.bossFought || (state.obtained[quest.boss.legendary] ?? 0) > 0);
     const selected = Math.min(ui.selectedEncounter[questKey] ?? 0, quest.encounters.length - (bossKnown ? 0 : 1));
@@ -1580,8 +1590,22 @@ function questPanel(ctx: Ctx, questKey: string): HTMLElement {
     if (tab === 'endless') {
         return shell(ctx, `${quest.name}: Endless`, `How deep can an adventurer get? No items, gold or XP: it only records depth.`, tabs, picker, ...endlessBody(ctx, quest, hero));
     }
-    return questNav(ctx, questKey, shell(ctx, quest.name, quest.description, tabs, areaRules(quest, state), picker, actions, hero && (isQuestCleared(state, quest.key) || grantedModifiers(state, hero, quest.key).length) ? modifiersSection(ctx, quest, hero) : null, track, detail, pools, record,
-        endlessOpen ? null : h('p', {class: 'muted small'}, `Endless opens after the first full clear of ${quest.name}.`), log));
+    return questNav(ctx, questKey, withClearFlag(hero, questKey, shell(ctx, quest.name, quest.description, tabs, areaRules(quest, state), picker, actions, hero && (isQuestCleared(state, quest.key) || grantedModifiers(state, hero, quest.key).length) ? modifiersSection(ctx, quest, hero) : null, track, detail, pools, record,
+        endlessOpen ? null : h('p', {class: 'muted small'}, `Endless opens after the first full clear of ${quest.name}.`), log)));
+}
+
+// A small blue banner for a quest the selected hero has fully cleared at least once.
+export function heroCleared(hero: Adventurer | undefined, questKey: string): boolean {
+    return !!hero && hero.records?.modClears?.[questKey] !== undefined;
+}
+export function clearFlag(hero: Adventurer): HTMLElement {
+    const el = h('span', {class: 'clearflag', role: 'img', 'aria-label': `${hero.name} has cleared this`, title: `${hero.name} has cleared this quest`});
+    el.innerHTML = '<svg viewBox="0 0 16 22" aria-hidden="true"><path class="pole" d="M2.5 1v20"/><path class="cloth" d="M3.5 2h10v13l-5-3-5 3z"/><path class="stripe" d="M3.5 5h10"/></svg>';
+    return el;
+}
+function withClearFlag(hero: Adventurer | undefined, questKey: string, panel: HTMLElement): HTMLElement {
+    if (hero && heroCleared(hero, questKey)) panel.querySelector('.panel-head h2')?.append(clearFlag(hero));
+    return panel;
 }
 
 // One encounter's monsters and difficulty, as the hero would face them.
@@ -1616,7 +1640,7 @@ function encounterDetail(ctx: Ctx, quest: QuestDef, selected: number, heroMods: 
                 `Level ${encounterLevel(quest, index)}`,
                 `difficulty ${fmt(encounterPower(quest, index), 2)}`,
                 `${lineup.length} monster${lineup.length > 1 ? 's' : ''}`,
-                hero && !quest.endless ? xpNote(hero.name, hero.level, questXpLevel(quest), heroMods.length) : '',
+                hero && !quest.endless ? xpNote(hero.name, hero.level, questXpLevel(quest), heroMods.filter(k => !challengeModifier(k)).length) : '',
             ].filter(Boolean).join(' · ')),
         ),
     );
@@ -1737,12 +1761,12 @@ function endlessBody(ctx: Ctx, quest: QuestDef, hero: Adventurer | undefined): (
     );
     const earned = trophy ? state.trophies?.[trophy.key] ?? -1 : -1;
     const trophyBox = trophy ? h('div', null,
-        h('h3', null, `Trophy: ${trophy.name}`),
+        h('h3', null, `Banner: ${trophy.name}`),
         h('div', {class: 'list'}, ...trophy.tiers.map((t, i) => h('div', {class: 'row small' + (i <= earned ? '' : ' muted')},
             h('span', {'aria-hidden': 'true'}, i <= earned ? '✓' : '○'),
             h('span', {class: 'grow'},
-                h('div', null, `${trophyTierNames[i]}: reach encounter ${t.target}`, i <= earned ? h('span', {class: 'sr-only'}, ' (earned)') : null),
-                h('div', {class: 'mods'}, trophy.bonusText(t.bonus))),
+                h('div', null, `${trophyTierName(trophy, i)}: reach encounter ${t.target}`, i <= earned ? h('span', {class: 'sr-only'}, ' (earned)') : null),
+                h('div', {class: 'mods tbonus'}, trophy.bonusText(t.bonus))),
             h('span', {class: 'num'}, `${t.fame} fame`),
         ))),
     ) : null;
@@ -1818,6 +1842,7 @@ export function bonusText(b: RewardBonuses): string {
     return [
         b.extraRewardChance ? `+${pct(b.extraRewardChance)} extra reward chance` : '',
         b.rarityUpgradeChance ? `+${pct(b.rarityUpgradeChance)} rarity upgrade chance` : '',
+        b.premiumChance ? `+${pct(b.premiumChance)} premium drop chance` : '',
         b.bonusRareChance ? `+${pct(b.bonusRareChance)} bonus rare encounter chance` : '',
         b.goldXpMultiplier && b.goldXpMultiplier !== 1 ? `${Math.round(b.goldXpMultiplier * 100) / 100}× gold and XP` : '',
     ].filter(Boolean).join(', ');
@@ -1856,6 +1881,28 @@ function modifiersSection(ctx: Ctx, quest: QuestDef, adventurer: Adventurer): HT
             : h('div', {class: 'item locked'}, h('span', {class: 'check', 'aria-hidden': 'true'}, '🔒'), body);
     });
     const total = getRewardBonuses(quest, active);
+    // Challenges: the Endless trial stepper once the quest's banner is earned, and the Void.
+    const maxTrial = trialMax(state, quest.key);
+    const trial = trialLevel(state, adventurer, quest.key);
+    const setTrial = (v: number) => { adventurer.trials = {...adventurer.trials, [quest.key]: Math.max(0, Math.min(maxTrial, v))}; ctx.refresh(); };
+    const challenges = challengeKeys(state, adventurer, quest);
+    // The level sits with its −/+ by the title; the lines below show the current level's totals.
+    const trialRow = maxTrial > 0 ? h('div', {class: 'item trialrow'},
+        h('span', {class: 'check', 'aria-hidden': 'true'}, '⚑'),
+        h('span', {class: 'grow'},
+            h('div', {class: 'trialhead'}, 'Endless trial',
+                h('button', {class: 'btn small', disabled: trial <= 0, 'aria-label': 'Lower the Endless trial', onclick: () => setTrial(trial - 1)}, '−'),
+                h('span', {class: 'num', 'aria-live': 'polite', 'aria-label': `Level ${trial} of ${maxTrial}`}, `${trial}/${maxTrial}`),
+                h('button', {class: 'btn small', disabled: trial >= maxTrial, 'aria-label': 'Raise the Endless trial', onclick: () => setTrial(trial + 1)}, '+')),
+            h('div', {class: 'mods'}, `+${trial * TRIAL_MONSTER * 100}% increased monster life and damage`),
+            h('div', {class: 'mods good'}, `+${trial * TRIAL_PREMIUM * 100}% premium drop chance`),
+            h('div', {class: 'mods muted'}, `Each level adds +${TRIAL_MONSTER * 100}% monster life and damage and +${TRIAL_PREMIUM * 100}% premium drop chance. One more level opens for every ${TRIAL_STEP} Endless encounters the guild clears here.`))) : null;
+    const voidRow = challenges.includes(VOID_KEY) ? h('div', {class: 'item locked voidrow'},
+        h('span', {class: 'check', 'aria-hidden': 'true'}, '◆'),
+        h('span', {class: 'grow'},
+            h('div', null, 'The Void', h('span', {class: 'granttag'}, ' From the Vessel Stone')),
+            h('div', {class: 'mods'}, `+${VOID_MONSTER * 100}% increased monster life and damage`),
+            h('div', {class: 'mods good'}, `+${VOID_PREMIUM * 100}% premium drop chance`))) : null;
     return h('div', null,
         h('h3', null, `${adventurer.name}'s modifiers (${active.length} on)`),
         h('div', {class: 'list'}, ...rows),
@@ -1863,6 +1910,8 @@ function modifiersSection(ctx: Ctx, quest: QuestDef, adventurer: Adventurer): HT
         h('p', {class: 'muted small', style: 'margin:6px 0 0'}, active.length
             ? `Together: ${bonusText(total)}. Entry fee ${getEntryFee(quest, active)} gold. Changes apply from ${adventurer.name}'s next run.`
             : `Modifiers make the quest harder for better rewards, and combine freely. Each adventurer picks their own, and changes apply from their next run. Unlocks are shared by the guild.`),
+        trialRow || voidRow ? h('h3', null, 'Challenges') : null,
+        trialRow || voidRow ? h('div', {class: 'list'}, trialRow, voidRow) : null,
     );
 }
 
@@ -2509,7 +2558,7 @@ function applicantCard(app: Applicant, action: HTMLElement | null, showAmbitions
                 h('div', {class: 'panel-title-sub'}, `Level ${app.level} ${cls.name} · `, h('span', {class: 'ambtier t' + app.tier}, ambitionTierNames[app.tier]))),
             action,
         ),
-        h('div', {class: 'herohead'}, heroPortrait(app, 'large'), heroPassives(app.classKey, app.passives, app.bonuses, 'passive small')),
+        h('div', {class: 'herohead'}, heroPortrait(app, 'large'), heroPassives(app, 'passive small')),
         showAmbitions ? ambitionList(app.ambitions) : null,
         showAmbitions ? h('div', {class: 'mods muted'}, `All three fulfilled: ${fameIfAll} fame on retirement`) : null,
     );
@@ -2552,6 +2601,10 @@ function hirePanel(ctx: Ctx): HTMLElement {
     const full = state.adventurers.length >= state.guild.memberSlots;
     const cost = refreshCost(state);
     return shell(ctx, full ? 'Applicants' : 'Hire an adventurer', `${state.adventurers.length}/${state.guild.memberSlots} members${full ? ' · roster full' : ''}`,
+        h('div', {class: 'row'},
+            h('button', {class: 'btn', disabled: state.gold < cost, onclick: () => { refreshApplicants(state); ctx.refresh(); }}, `New applicants · ${cost} gold`),
+            h('button', {class: 'btn', onclick: () => { ctx.ui.panel = {kind: 'guild'}; ctx.refresh(); }}, 'Back to the guild hall'),
+        ),
         full ? h('div', {class: 'rosterfull', role: 'status'},
             h('div', null, h('strong', null, 'Roster full. '), 'You can look, but hiring needs a free member slot: retire a member or unlock another slot.'),
             h('button', {class: 'btn small', onclick: () => openGuildSection(ctx, 'guild-roster')}, 'Go to members'),
@@ -2581,10 +2634,6 @@ function hirePanel(ctx: Ctx): HTMLElement {
                         }, `Hire · ${app.fee} gold`));
             })),
         ),
-        h('div', {class: 'row'},
-            h('button', {class: 'btn', disabled: state.gold < cost, onclick: () => { refreshApplicants(state); ctx.refresh(); }}, `New applicants · ${cost} gold`),
-            h('button', {class: 'btn', onclick: () => { ctx.ui.panel = {kind: 'guild'}; ctx.refresh(); }}, 'Back to the guild hall'),
-        ),
     );
 }
 
@@ -2612,17 +2661,23 @@ function suitsLine(classKey: string): HTMLElement {
 
 // A hero's or applicant's core passives (the class's own, or rolled ones for the top classes),
 // their attribute growth, and any rare bonus passives.
-function heroPassives(classKey: string, rolled: HeroPassive[] | undefined, bonuses: Partial<Record<BonusKey, number>> | undefined, cls: string): HTMLElement {
-    const c = classes[classKey];
-    const lines = rolled
-        ? rolled.map(p => h('div', null, h('strong', null, `${p.enhanced ? 'Enhanced ' : ''}${passiveDefs[p.key].name}: `), p.enhanced ? passiveDefs[p.key].enhanced : passiveDefs[p.key].description))
-        : [h('div', null, h('strong', null, `${c.passive.name}: `), c.passive.description)];
-    const rare = rareBonusText(bonuses);
+function heroPassives(hero: {classKey: string, passives?: HeroPassive[], bonuses?: Partial<Record<BonusKey, number>>, curses?: Partial<Record<BonusKey, number>>}, cls: string, state?: GameState): HTMLElement {
+    const c = classes[hero.classKey];
+    // Effect scales: enhanced rolls and the guild's increased core passive effect. A passive reads
+    // its base text unless it is scaled.
+    const increased = !state ? 0 : equippedBonuses(state).reduce((sum, b) => sum + (b.stats?.corePassiveEffect ?? 0), 0);
+    const line = (key: PassiveKey, enhanced?: boolean) => h('div', null, h('strong', null, `${enhanced ? 'Enhanced ' : ''}${passiveDefs[key].name}: `), passiveDefs[key].text(passiveScale(hero, key, classPassive, increased)));
+    const lines = hero.passives
+        ? hero.passives.map(p => line(p.key, p.enhanced))
+        : c.passiveKey ? [line(c.passiveKey)] : [h('div', null, h('strong', null, `${c.passive.name}: `), c.passive.description)];
+    const rare = rareBonusText(hero.bonuses);
+    const cursed = curseText(hero.curses);
     return h('div', {class: cls},
         ...lines,
-        suitsLine(classKey),
-        h('div', {class: 'muted'}, `Grows ${growthText(classKey)} per level`),
+        suitsLine(hero.classKey),
+        h('div', {class: 'muted'}, `Grows ${growthText(hero.classKey)} per level`),
         rare.length ? h('div', null, h('span', {class: 'raretag'}, 'Rare'), ' ', rare.join(', ')) : null,
+        cursed.length ? h('div', null, h('span', {class: 'raretag cursed'}, 'Cursed'), ' ', cursed.join(', '), ` · +${Math.round(100 * cursePremium(hero))}% premium drop chance`) : null,
     );
 }
 
@@ -2709,7 +2764,9 @@ function retireDialog(ctx: Ctx, adventurer: Adventurer): HTMLElement {
 
 function guildPanel(ctx: Ctx): HTMLElement {
     const {state} = ctx;
-    const owned = materialOrder.filter(key => (state.obtained[key] ?? 0) > 0);
+    const found = materialOrder.filter(key => (state.obtained[key] ?? 0) > 0);
+    const filter = (ctx.ui.ledgerFilter ?? '').trim().toLowerCase();
+    const owned = filter ? found.filter(key => requireMaterial(key).name.toLowerCase().includes(filter)) : found;
     const anyTrophy = Object.keys(state.trophies ?? {}).length > 0;
     return shell(ctx, 'Guild hall', `Fame ${state.fame} · ${state.adventurers.length}/${state.guild.memberSlots} members`,
         expansionSection(ctx),
@@ -2723,26 +2780,37 @@ function guildPanel(ctx: Ctx): HTMLElement {
         ),
         hallOfLegends(state),
         h('div', null,
-            h('h3', null, 'Material ledger'),
+            h('div', {class: 'row ledgerhead'},
+                h('h3', {class: 'grow'}, 'Material ledger'),
+                found.length ? h('input', {
+                    type: 'search', class: 'ledgersearch', placeholder: 'Search materials', 'aria-label': 'Search the material ledger',
+                    value: ctx.ui.ledgerFilter ?? '',
+                    oninput: (e: Event) => {
+                        const input = e.target as HTMLInputElement;
+                        // Keep the attribute in step, so the rebuilt panel keeps this input (and its focus).
+                        input.setAttribute('value', input.value);
+                        ctx.ui.ledgerFilter = input.value;
+                        ctx.refresh();
+                    },
+                }) : null),
             owned.length ? h('div', {class: 'list'}, ...owned.map(key => h('div', {class: 'row small'},
                 h('span', {class: 'grow'}, materialLink(ctx, key), ' ', h('span', {class: 'power'}, `P${requireMaterial(key).power}`)),
                 h('span', {class: 'num'}, `${state.materials[key] ?? 0} owned`),
                 h('span', {class: 'num muted', title: 'Found in total, including ones since used or sold'}, `${state.obtained[key] ?? 0} found`),
-            ))) : h('div', {class: 'muted small'}, 'Nothing gathered yet.'),
+            ))) : h('div', {class: 'muted small'}, found.length ? `No materials match "${ctx.ui.ledgerFilter}".` : 'Nothing gathered yet.'),
         ),
     );
 }
 
 // ---------------- Trophies ----------------
 
-function trophyTierLabel(def: TrophyDef, tier: number): string {
-    return `${def.name} · ${trophyTierNames[tier]}`;
-}
+const trophyTierLabel = trophyLabel;
 
 // Trophy slots near the top of the guild panel. Equipped trophies give their bonus to the guild.
 function trophySection(ctx: Ctx): HTMLElement {
     const {state, ui} = ctx;
     const earned = trophyList.filter(def => (state.trophies?.[def.key] ?? -1) >= 0);
+    const banners = earned.filter(def => def.kind === 'endless');
     const slots = state.guild.trophySlots ?? 0;
     const equipped = state.trophySlots ?? [];
     const picking = ui.trophyPick;
@@ -2757,11 +2825,11 @@ function trophySection(ctx: Ctx): HTMLElement {
                     disabled: !!nextTrophySlot.blocked,
                     title: `Unlock a trophy slot for ${nextTrophySlot.unlock.gold} gold${unlockFame(nextTrophySlot.unlock) ? ` and gain ${unlockFame(nextTrophySlot.unlock)} fame` : ''}`,
                     onclick: () => { buySlot(state, 'trophySlot'); ctx.refresh(); },
-                }, h('div', {class: 'small'}, 'Unlock'), h('div', {class: 'small muted'}, `${nextTrophySlot.unlock.gold} gold`), unlockFame(nextTrophySlot.unlock) ? h('div', {class: 'small fame-gain'}, `+${unlockFame(nextTrophySlot.unlock)} fame`) : null);
+                }, trophyCase(undefined, 0), h('div', {class: 'small'}, 'Unlock'), h('div', {class: 'small muted'}, `${nextTrophySlot.unlock.gold} gold`), unlockFame(nextTrophySlot.unlock) ? h('div', {class: 'small fame-gain'}, `+${unlockFame(nextTrophySlot.unlock)} fame`) : null);
             }
             const u = trophyUnlocks[i - 1];
             const why = i === 0 ? 'Opens with your first trophy' : !u ? 'Locked' : (state.expansion ?? 0) >= (u.expansion ?? 0) ? 'Unlock the slot before' : `Requires Guild Expansion ${u.expansion}`;
-            return h('div', {class: 'trophy-slot locked'}, h('div', {class: 'small'}, '🔒'), h('div', {class: 'small muted'}, why));
+            return h('div', {class: 'trophy-slot locked'}, trophyCase(undefined, 0), h('div', {class: 'small'}, '🔒'), h('div', {class: 'small muted'}, why));
         }
         const key = equipped[i] ?? null;
         const def = key ? trophies[key] : undefined;
@@ -2772,21 +2840,55 @@ function trophySection(ctx: Ctx): HTMLElement {
             'aria-label': def ? `Trophy slot ${i + 1}: ${def.name}. Change` : `Trophy slot ${i + 1}: empty. Choose a trophy`,
             onclick: () => { ui.trophyPick = picking === i ? null : i; ctx.refresh(); },
         },
+        trophyCase(def, tier),
         def ? h('div', {class: 'tname'}, def.name) : h('div', {class: 'muted small'}, 'Empty'),
-        def ? h('div', {class: 'small'}, trophyTierNames[tier]) : null,
-        def ? h('div', {class: 'mods'}, def.bonusText(def.tiers[tier].bonus)) : null,
+        def ? h('div', {class: 'small ttier'}, trophyTierName(def, tier)) : null,
+        def ? h('div', {class: 'mods tbonus'}, def.bonusText(def.tiers[tier].bonus)) : null,
         def ? h('div', {class: 'mods muted'}, earnedText(def, tier)) : null);
     });
     return h('div', {id: 'guild-trophies'},
         h('h3', null, `Trophies (${earned.length} earned)`),
         h('div', {class: 'trophy-slots'}, ...slotEls),
-        earned.length ? null : h('p', {class: 'muted small'}, 'Trophies come from clearing quests, pushing endless depths and leveling each class. Each one is upgraded through Bronze, Silver, Gold and Platinum, and gives a bonus while it sits in a slot.'),
+        banners.length ? h('div', {class: 'trophy-banners', role: 'list', 'aria-label': 'Endless banners'}, ...banners.map(def => {
+            const tier = state.trophies![def.key];
+            const text = `${trophyTierLabel(def, tier)}: ${def.bonusText(def.tiers[tier].bonus)}. Opens the Endless trial for ${quests[def.key.replace(/^endless-/, '')].name}. Earned: ${earnedText(def, tier)}`;
+            return h('div', {class: 'tbanner-wrap', role: 'listitem', tabindex: '0', title: text, 'aria-label': text},
+                trophyBanner(def, tier),
+                h('div', {class: 'small ttier tier' + tier}, `+${Math.round((def.tiers[tier].bonus.extraRewardChance ?? 0) * 100)}%`));
+        })) : null,
+        earned.length ? null : h('p', {class: 'muted small'}, 'Trophies come from clearing quests, pushing endless depths and leveling each class. Each one is upgraded through Bronze, Silver, Gold and Platinum and gives a bonus while it sits in a slot. Endless banners hang beneath the slots and always count.'),
     );
 }
 
-// The next tier of every trophy that is in reach of the guild right now, with its fame.
+// Rough difficulty of a trophy tier: the hero level it calls for, minus the level the guild already
+// has toward it (the best hero of that class for class trophies, the best member otherwise). Quest
+// clears call for the quest's level plus MOD_LEVELS per required modifier; Endless goals for the level
+// whose typical monster power matches that encounter (powerForLevel).
+const MOD_LEVELS = 4;
+function levelForMonsterPower(power: number): number {
+    for (let level = 1; level <= 200; level++) if (powerForLevel(level) >= power) return level;
+    return 200;
+}
+function achievementDifficulty(state: GameState, def: TrophyDef, tier: number): number {
+    const target = def.tiers[tier].target;
+    const best = Math.max(1, ...state.adventurers.map(a => a.level));
+    if (def.kind === 'class') return target - Math.max(0, def.value(state));
+    const questKey = def.key.replace(/^(clear|endless)-/, '');
+    if (def.kind === 'quest') return questXpLevel(quests[questKey]) + MOD_LEVELS * target - best;
+    const endless = quests[endlessKey(questKey)];
+    return levelForMonsterPower(encounterPower(endless, Math.min(endless.encounters.length - 1, target - 1))) - best;
+}
+const UPCOMING_SHOWN = 5;
+
+// The next tier of the trophies in reach of the guild right now, easiest first (achievementDifficulty),
+// with their fame. Only the UPCOMING_SHOWN easiest show.
 function upcomingAchievements(state: GameState): HTMLElement {
-    const rows = trophyList.filter(def => def.relevant(state)).flatMap(def => {
+    const next = (def: TrophyDef) => tierFor(def, def.value(state)) + 1;
+    const ranked = trophyList.filter(def => def.relevant(state) && next(def) < def.tiers.length)
+        .map(def => ({def, d: achievementDifficulty(state, def, next(def))}))
+        .sort((a, b) => a.d - b.d || a.def.tiers[next(a.def)].fame - b.def.tiers[next(b.def)].fame)
+        .slice(0, UPCOMING_SHOWN).map(r => r.def);
+    const rows = ranked.flatMap(def => {
         const value = def.value(state);
         const next = tierFor(def, value) + 1;
         if (next >= def.tiers.length) return [];
@@ -2795,7 +2897,8 @@ function upcomingAchievements(state: GameState): HTMLElement {
         return [h('div', {class: 'row small'},
             h('span', {class: 'grow'},
                 h('div', null, def.goal(t.target)),
-                h('div', {class: 'mods'}, `${trophyTierLabel(def, next)}: ${def.bonusText(t.bonus)}`)),
+                h('div', {class: 'mods'}, trophyTierLabel(def, next)),
+                h('div', {class: 'mods tbonus'}, def.bonusText(t.bonus))),
             progress ? h('span', {class: 'num muted'}, progress) : null,
             h('span', {class: 'num'}, `+${t.fame} fame`),
         )];

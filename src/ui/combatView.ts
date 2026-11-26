@@ -6,7 +6,7 @@ import {monsterKit} from '../engine/abilities';
 import {heroAttackUrl, heroPortrait, heroSpriteHeadroom, heroSpriteUrl} from './portraits';
 import {burnDps, shockFactor} from '../engine/ailments';
 import type {Adventurer, Ailments, GameState} from '../engine/types';
-import {h} from './dom';
+import {h, shortNumber} from './dom';
 import {classIcon, monsterIcon} from './icons';
 import {fightLayout, monsterArtUrl, monsterHeadroom} from './monsterArt';
 import {backgroundFloor, backgroundUrl} from './backgrounds';
@@ -35,9 +35,10 @@ const hitDelay = (hitIndex: number) => Math.min(hitIndex, 6) * HIT_STAGGER_MS;
 const MAX_FLOATERS = 40;
 const MAX_LOG = 7;
 
+// Health, ward and damage in battle abbreviate like gold and fame in the HUD (shortNumber).
+// Health rounds up, so a fighter still standing never shows 0.
 function shortNum(n: number): string {
-    n = Math.max(0, n);
-    return n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : String(Math.ceil(n));
+    return shortNumber(Math.ceil(Math.max(0, n)));
 }
 
 // The word floated on a fighter when an ability applies an ailment, and its colour class.
@@ -59,7 +60,7 @@ const BASIC_FX_JITTER = 14;
 function renderAilments(el: HTMLElement, a: Ailments | undefined, extra: [string, string][] = []) {
     const parts: [string, string][] = [...extra];
     const burn = burnDps(a) * shockFactor(a);
-    if (burn > 0) parts.push(['burn', `Burn ${burn >= 10 ? Math.round(burn) : burn.toFixed(1)}/s`]);
+    if (burn > 0) parts.push(['burn', `Burn ${burn >= 10 ? shortNumber(burn) : burn.toFixed(1)}/s`]);
     if ((a?.chill ?? 0) >= 0.01) parts.push(['chill', `Chill ${Math.round(100 * a!.chill!)}%`]);
     if ((a?.shock ?? 0) >= 0.01) parts.push(['shock', `Shock ${Math.round(100 * a!.shock!)}%`]);
     if ((a?.weaken ?? 0) >= 0.01) parts.push(['weaken', `Weak ${Math.round(100 * a!.weaken!)}%`]);
@@ -67,7 +68,7 @@ function renderAilments(el: HTMLElement, a: Ailments | undefined, extra: [string
     if ((a?.blind ?? 0) >= 0.01) parts.push(['blind', `Blind ${Math.round(100 * a!.blind!)}%`]);
     if ((a?.sunder ?? 0) >= 0.01) parts.push(['sunder', `Sunder ${Math.round(100 * a!.sunder!)}%`]);
     if ((a?.gale ?? 0) >= 0.01) parts.push(['gale', `Gale ${Math.round(100 * a!.gale!)}%`]);
-    if (a?.bleed && a.bleed.remaining > 0) parts.push(['bleed', `Bleed ${a.bleed.dps >= 10 ? Math.round(a.bleed.dps) : a.bleed.dps.toFixed(1)}/s`]);
+    if (a?.bleed && a.bleed.remaining > 0) parts.push(['bleed', `Bleed ${a.bleed.dps >= 10 ? shortNumber(a.bleed.dps) : a.bleed.dps.toFixed(1)}/s`]);
     const sig = parts.map(p => p[1]).join('|');
     if (el.dataset.sig === sig) return;
     el.dataset.sig = sig;
@@ -699,7 +700,7 @@ export class CombatView {
         if (e.reflected) {
             if (e.kind === 'miss') this.float(target, 'dodge', 'word reflect', 0);
             else if (e.kind === 'block') this.float(target, 'block', 'word block reflect', 0);
-            else this.float(target, `↩${Math.round((e.amount ?? 0) + (e.ward ?? 0))}`, `dmg ${e.damageType ?? 'physical'} reflect`, 0, emphasis);
+            else this.float(target, `↩${shortNumber(Math.round((e.amount ?? 0) + (e.ward ?? 0)))}`, `dmg ${e.damageType ?? 'physical'} reflect`, 0, emphasis);
             return;
         }
         const fx = e.side === 'hero' && (e.hitIndex ?? 0) === 0 ? this.pendingFx.get(e.slot) : undefined;
@@ -782,7 +783,7 @@ export class CombatView {
         if (!this.log.isConnected || (e.hitIndex ?? 0) > 0 && e.kind !== 'hit') return;
         const foe = this.cards.get(e.slot)?.name ?? 'A monster';
         const hero = this.heroName;
-        const amount = Math.round((e.amount ?? 0) + (e.ward ?? 0));
+        const amount = shortNumber(Math.round((e.amount ?? 0) + (e.ward ?? 0)));
         const crit = e.critLevels ? ` (crit${e.critLevels > 1 ? ' ×' + e.critLevels : ''})` : '';
         const type = e.damageType && e.damageType !== 'physical' ? ` ${e.damageType}` : '';
         let text: string;
@@ -846,11 +847,12 @@ const FLOAT_DIRS: Record<FloatDir, {start: [number, number], end: [number, numbe
 // A hit's number with its crit marks. Crits stack without a cap, so marks collapse by fours:
 // four plain "!" make one gold "!", four gold make one red, largest first (7 crits: gold ! then !!!).
 export function critText(amount: number, crit: number): string | HTMLElement {
-    if (!crit) return String(amount);
+    const n = shortNumber(amount);
+    if (!crit) return n;
     const red = Math.floor(crit / 16), gold = Math.floor(crit % 16 / 4), plain = crit % 4;
-    if (!red && !gold) return amount + '!'.repeat(plain);
+    if (!red && !gold) return n + '!'.repeat(plain);
     const mark = (cls: string, n: number) => n ? [h('span', {class: 'critmark ' + cls}, '!'.repeat(n))] : [];
-    return h('span', {title: `${crit} crits`}, String(amount), ...mark('red', red), ...mark('gold', gold), plain ? '!'.repeat(plain) : null);
+    return h('span', {title: `${crit} crits`}, n, ...mark('red', red), ...mark('gold', gold), plain ? '!'.repeat(plain) : null);
 }
 
 function floatDir(text: string, cls: string): FloatDir | null {

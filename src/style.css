@@ -351,11 +351,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .list > * { padding: 7px 10px; }
 .list > * + * { border-top: 1px solid var(--line); }
-.list .item { display: flex; align-items: center; gap: 10px; background: none; border-left: none; border-right: none; border-bottom: none; text-align: left; width: 100%; }
+.list .item { display: flex; align-items: center; gap: 10px; background: none; border-left: none; border-right: none; border-bottom: none; text-align: left; width: 100%; box-sizing: border-box; }
 .list button.item:hover { background: var(--surface-2); }
 .list .item.selected { background: var(--accent-soft); }
 .slot-label { width: 76px; flex: none; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); }
 .mods { font-size: 12.5px; color: var(--ink-soft); }
+/* Trophy bonuses: one line per kind (trophyBonusText), in the title color so they stand out from the muted goal text. */
+.tbonus { white-space: pre-line; color: var(--ink); }
+.dropcard .tbonus { color: inherit; }
 .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 0 5px; border-radius: 4px; border: 1px solid currentColor; }
 .tag.C { color: var(--tier-c); }
 .tag.U { color: var(--tier-u); }
@@ -451,6 +454,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .slotpick:hover { color: var(--accent); }
 .panel.picker { width: min(320px, 100%); z-index: 5; }
 .panel.gearpick { width: min(340px, 100%); z-index: 5; }
+/* The trophy picker is as wide as the guild panel, with each trophy's case at the left. */
+.panel.gearpick.trophypick { width: min(420px, 100%); }
+.trophypicklist .item { display: flex; align-items: flex-start; gap: 10px; text-align: left; }
+.tpick-art { flex: none; width: 84px; }
+.tpick-art .tcase { zoom: 0.7; width: 120px; margin: 0; }
+.trophypicklist .tname { font-family: var(--font-display); font-weight: 700; font-size: 14px; line-height: 1.15; }
 .expansion { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; flex-wrap: nowrap; }
 .slotbox.locked { opacity: 0.4; }
 .preview { border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; background: var(--accent-soft); display: flex; flex-direction: column; gap: 4px; }
@@ -705,7 +714,7 @@ button.pickname:focus-visible { outline: none; }
 .craftlink:disabled { color: var(--ink-soft); cursor: default; }
 
 /* Trophy slots in the guild panel. The border color is the trophy's tier. */
-.trophy-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
+.trophy-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
 .trophy-slot { border: 1px dashed var(--line); border-radius: 8px; padding: 6px; min-height: 76px; background: none; color: inherit; font: inherit; text-align: left; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .trophy-slot.locked { opacity: 0.7; }
 button.trophy-slot { cursor: pointer; }
@@ -713,10 +722,51 @@ button.trophy-slot:hover { border-color: var(--accent); }
 .trophy-slot.filled { border-style: solid; border-width: 2px; background: var(--surface-2); }
 .trophy-slot.picking { box-shadow: inset 0 0 0 1px var(--accent); border-color: var(--accent); }
 .trophy-slot .tname { font-family: var(--font-display); font-weight: 700; font-size: 13px; line-height: 1.15; overflow-wrap: break-word; }
-.trophy-slot.tier0 { border-color: var(--trophy-0); } .trophy-slot.tier0 .small { color: var(--trophy-0); }
-.trophy-slot.tier1 { border-color: var(--trophy-1); } .trophy-slot.tier1 .small { color: var(--trophy-1); }
-.trophy-slot.tier2 { border-color: var(--trophy-2); } .trophy-slot.tier2 .small { color: var(--trophy-2); }
-.trophy-slot.tier3 { border-color: var(--trophy-3); } .trophy-slot.tier3 .small { color: var(--trophy-3); }
+.trophy-slot.tier0 { border-color: var(--trophy-0); } .trophy-slot.tier0 .ttier { color: var(--trophy-0); }
+.trophy-slot.tier1 { border-color: var(--trophy-1); } .trophy-slot.tier1 .ttier { color: var(--trophy-1); }
+.trophy-slot.tier2 { border-color: var(--trophy-2); } .trophy-slot.tier2 .ttier { color: var(--trophy-2); }
+.trophy-slot.tier3 { border-color: var(--trophy-3); } .trophy-slot.tier3 .ttier { color: var(--trophy-3); }
+
+/* Glass display case inside each trophy slot: the tier's pedestal (base-N) with the trophy on it.
+   Sprites are drawn at half their pixel size (see ui/trophyArt.ts). */
+.tcase { position: relative; height: 128px; margin: -2px -2px 4px; border-radius: 6px 6px 3px 3px; overflow: hidden;
+    background: linear-gradient(180deg, color-mix(in srgb, #bfe3ff 16%, transparent), color-mix(in srgb, #bfe3ff 5%, transparent) 70%, color-mix(in srgb, var(--ink) 10%, transparent));
+    border: 1px solid color-mix(in srgb, #d8eeff 55%, var(--line));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, white 35%, transparent), inset 0 10px 14px -10px color-mix(in srgb, white 70%, transparent), inset 0 -8px 10px -6px color-mix(in srgb, var(--ink) 22%, transparent); }
+.tcase::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 5px; background: linear-gradient(180deg, color-mix(in srgb, var(--ink) 30%, #8a6f4e), color-mix(in srgb, var(--ink) 10%, #b7a888)); }
+.tcase::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 8px; background: linear-gradient(180deg, #6b5236, #3e2f1f); }
+.tcase-stand { position: absolute; left: 0; right: 0; bottom: 6px; display: flex; flex-direction: column; align-items: center; z-index: 1; }
+.tcase-obj { display: block; image-rendering: auto; max-width: 92%; filter: drop-shadow(0 2px 2px rgba(0,0,0,.35)); position: relative; z-index: 1; }
+.tcase-base { display: block; max-width: 96%; }
+/* Each object's foot lands mid-way across its pedestal's flat top. */
+.tcase.tier0 .tcase-obj { margin-bottom: -9px; } .tcase.tier1 .tcase-obj { margin-bottom: -10px; }
+.tcase.tier2 .tcase-obj { margin-bottom: -12px; } .tcase.tier3 .tcase-obj { margin-bottom: -13px; }
+.tcase-glass { position: absolute; inset: 5px 0 8px; background: radial-gradient(ellipse at 50% 100%, color-mix(in srgb, #ffe9b0 18%, transparent), transparent 70%); }
+.tcase.tier3 .tcase-glass { background: radial-gradient(ellipse at 50% 100%, color-mix(in srgb, #c9f6ff 30%, transparent), transparent 72%); }
+.tcase-shine { position: absolute; inset: 0; pointer-events: none; z-index: 2;
+    background: linear-gradient(115deg, transparent 18%, color-mix(in srgb, white 30%, transparent) 22%, transparent 30%, transparent 62%, color-mix(in srgb, white 16%, transparent) 65%, transparent 69%); }
+.tcase.empty { opacity: 0.75; }
+.trophy-slot.locked .tcase { filter: grayscale(1); opacity: 0.45; }
+button.trophy-slot:hover .tcase, button.trophy-slot:focus-visible .tcase { border-color: var(--accent); }
+.trophy-slot .ttier { font-weight: 600; }
+
+/* Endless banners: always in effect, hung in a row under the trophy slots. */
+.trophy-banners { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 10px; margin-top: 10px; padding: 8px 8px 4px; border-top: 6px solid #6b5236; border-radius: 3px;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--ink) 8%, transparent), transparent 60%); }
+.tbanner-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; border-radius: 4px; margin-top: -8px; }
+.tbanner-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tbanner { position: relative; display: flex; justify-content: center; }
+.tbanner-cloth { display: block; filter: drop-shadow(0 2px 2px rgba(0,0,0,.3)); }
+.tbanner-emblem { position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%); }
+.tbanner.tier0 .tbanner-emblem { width: 26px !important; height: auto !important; top: 50%; }
+.tbanner.tier1 .tbanner-emblem { width: 30px !important; height: auto !important; }
+.tbanner.tier2 .tbanner-emblem { width: 38px !important; height: auto !important; top: 48%; }
+.tbanner.tier3 .tbanner-emblem { width: 42px !important; height: auto !important; top: 50%; }
+.ttier.tier0 { color: var(--trophy-0); } .ttier.tier1 { color: var(--trophy-1); } .ttier.tier2 { color: var(--trophy-2); } .ttier.tier3 { color: var(--trophy-3); }
+.list .item.trialrow { align-items: flex-start; }
+.trialhead { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.trialhead .btn { min-width: 28px; }
+.voidrow .check { color: var(--tier-r); } .trialrow .check { color: var(--accent); }
 
 /* Hire slot on the guild roster, styled like an open crafting slot. */
 .slotbox.hireslot { background: none; color: var(--accent); font: inherit; font-size: 14px; cursor: pointer; text-align: left; min-height: 44px; }
@@ -869,7 +919,9 @@ button.trophy-slot:hover { border-color: var(--accent); }
 /* The tooltip never takes the pointer, so it closes as soon as the pointer leaves the line, and a
    mouse click on the line or its buttons doesn't hold it open: focus opens it only from the keyboard. */
 .delta-detail { pointer-events: none; }
-.delta:not(.static):hover .delta-detail, .delta:not(.static):focus-visible .delta-detail, .delta:not(.static):has(:focus-visible) .delta-detail { display: block; }
+/* The line's own detail is only the source: a single copy floats on the body (main.ts deltaTip). */
+.delta-detail.delta-tip { display: block; position: fixed; z-index: 1000; top: 0; left: 0; max-width: min(320px, calc(100vw - 16px)); }
+.delta-detail.delta-tip[hidden] { display: none; }
 .dstats { display: flex; flex-wrap: wrap; gap: 2px 8px; }
 .dstats .up { color: var(--good); }
 .dstats .down { color: var(--bad, #b3261e); }
@@ -885,8 +937,6 @@ button.trophy-slot:hover { border-color: var(--accent); }
 .guidecard { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 20; display: flex; gap: 10px; align-items: center;
     max-width: min(560px, calc(100% - 32px)); background: var(--surface); color: var(--ink); border: 1px solid var(--accent); border-left: 4px solid var(--accent);
     border-radius: 8px; padding: 8px 12px; box-shadow: 0 6px 18px var(--shadow); font-size: 13.5px; }
-.list:has(.delta) { overflow: visible; }
-.delta:hover, .delta:focus-visible, .delta:has(:focus-visible) { z-index: 31; }
 
 /* Guidance pulse on the map site or hero card the guidance card points to */
 /* A glow that swells and settles back the same way (alternate), so the loop has no seam. */
@@ -1330,7 +1380,8 @@ button.trophy-slot:hover { border-color: var(--accent); }
 /* First adventurer pick on a new game: three applicants side by side, stacked on a phone. */
 .starter-backdrop { z-index: 40; }
 .panel.matdetail.starterpick { width: min(1000px, 100%); max-height: min(860px, 100%); }
-.starterlist { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
+/* Every starter card is as tall as the tallest one (equal rows, stretched cards), on phones too. */
+.starterlist { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 10px; align-items: stretch; }
 @media (max-width: 760px) { .starterlist { grid-template-columns: 1fr; } }
 
 /* Guidance cards point at the HUD button (or map site) to press, and other toasts wait while one shows. */
@@ -1352,6 +1403,9 @@ body.guiding .toast, body.guiding .drops { display: none; }
 .site .glyph.art { width: 104px; height: 88px; border: none; border-radius: 0; background: none; box-shadow: none; display: flex; align-items: flex-end; justify-content: center; }
 .site .glyph.art img { width: 104px; height: 88px; object-fit: contain; object-position: center bottom; filter: drop-shadow(0 4px 3px rgba(40, 30, 10, 0.35)); transition: filter 120ms; }
 .site:hover .glyph.art { filter: none; }
+/* The guild hall's size follows the guild's expansion (guildGlyph); it rises above the box. */
+.site .glyph.art.guildart { overflow: visible; }
+.site .glyph.art.guildart img { object-fit: fill; flex: none; }
 .site:hover .glyph.art img { filter: drop-shadow(0 4px 3px rgba(40, 30, 10, 0.35)) brightness(1.08); }
 .site.open .glyph.art { outline: none; }
 .site.open .glyph.art img { filter: drop-shadow(0 0 2px var(--accent)) drop-shadow(0 0 6px var(--accent)) drop-shadow(0 4px 3px rgba(40, 30, 10, 0.35)); }
@@ -1639,3 +1693,25 @@ body.no-item-icons .craftedbody .mods, body.no-item-icons .gearopt .mods { font-
 .startercard:hover, .startercard:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), 0 6px 16px var(--shadow); transform: translateY(-2px); outline: none; }
 .startercard:active { transform: translateY(0); box-shadow: 0 0 0 2px var(--accent); }
 @media (prefers-reduced-motion: reduce) { .startercard, .startercard:hover, .startercard:focus-visible { transition: none; transform: none; } }
+
+/* Cleared by the selected hero: a small blue banner on the map site and beside the quest title. */
+.clearflag { display: inline-block; width: 14px; height: 19px; vertical-align: -2px; margin-left: 6px; }
+.clearflag svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.clearflag .pole { stroke: #6b5534; stroke-width: 1.6; stroke-linecap: round; fill: none; }
+.clearflag .cloth { fill: #2f6fd6; stroke: #163e85; stroke-width: 1.1; stroke-linejoin: round; }
+.clearflag .stripe { stroke: #a9c8ff; stroke-width: 1.4; fill: none; }
+.site .glyph { position: relative; }
+.site .glyph .clearflag { position: absolute; top: -6px; right: -8px; width: 20px; height: 28px; margin: 0; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35)); }
+.site .glyph.art .clearflag { top: 4px; right: 2px; }
+.site .glyph .clearflag svg { width: 100%; height: 100%; stroke: none; filter: none; }
+
+/* A map token recovering at its quest: faded like the resting hero in battle. */
+.token.recovering .body, .token.recovering .bar { opacity: 0.4; filter: grayscale(0.6); }
+.token.recovering .name { opacity: 0.6; }
+
+/* Material ledger search in the guild panel. */
+.ledgerhead { align-items: center; gap: 8px; }
+.ledgerhead h3 { margin: 0; }
+.ledgersearch { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); width: 11em; min-width: 0; }
+.ledgersearch:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.trophypicklist .item.emptyslot { align-items: center; }
