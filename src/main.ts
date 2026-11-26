@@ -158,6 +158,7 @@ function renderHud() {
         h('button', {class: 'btn devbtn', onclick: () => { devOpen = !devOpen; renderHud(); }}, 'Dev'),
         ...(devOpen ? [devMenu()] : []),
     );
+    fitHeroBar();
 }
 
 // Quick actions left of the hero cards: the map/battle switch and every map site that opens a panel,
@@ -471,6 +472,25 @@ function heroBar(): HTMLElement {
     dragScroll(bar);
     return bar;
 }
+// Wide screens: the hero cards share the HUD line until they no longer fit on it in one row, then
+// they drop to a line of their own under the other HUD items, as on narrow screens, instead of
+// wrapping into a column. The test uses the cards' natural width, so it gives the same answer
+// whichever line they are on.
+function fitHeroBar() {
+    const bar = hud.querySelector<HTMLElement>('.hud-heroes');
+    if (!bar || narrowScreen.matches) { hud.classList.remove('heroes-below'); return; }
+    const hs = getComputedStyle(hud), bs = getComputedStyle(bar);
+    const cards = [...bar.children] as HTMLElement[];
+    const gap = parseFloat(bs.columnGap) || 0;
+    const needed = cards.reduce((sum, c) => sum + c.offsetWidth, 0) + gap * Math.max(0, cards.length - 1)
+        + (parseFloat(bs.paddingLeft) || 0) + (parseFloat(bs.paddingRight) || 0);
+    const others = ([...hud.children] as HTMLElement[]).filter(el => el !== bar && getComputedStyle(el).position !== 'absolute');
+    const hudGap = parseFloat(hs.columnGap) || 0;
+    const room = hud.clientWidth - (parseFloat(hs.paddingLeft) || 0) - (parseFloat(hs.paddingRight) || 0)
+        - others.reduce((sum, el) => sum + el.offsetWidth, 0) - hudGap * others.length;
+    hud.classList.toggle('heroes-below', needed > room);
+}
+new ResizeObserver(() => fitHeroBar()).observe(hud);
 // Hero cards sit in one row that scrolls sideways when they don't fit. Touch scrolls natively; a
 // mouse drags it, and a drag of more than a few pixels doesn't count as a click on a card.
 function dragScroll(el: HTMLElement) {

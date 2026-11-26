@@ -1723,3 +1723,15 @@ body.no-item-icons .craftedbody .mods, body.no-item-icons .gearopt .mods { font-
 .signature b { font-weight: 700; }
 .signature.sigtag { display: inline; font-size: inherit; font-weight: 600; margin: 0; }
 
+
+/* v340: wide screens with more hero cards than fit beside the other HUD items (main.ts fitHeroBar):
+   the cards take a full-width line of their own below, in one row that scrolls sideways, like
+   narrow screens, instead of wrapping into a column. */
+@media (min-width: 761px) {
+    .hud.heroes-below > .hud-heroes { order: 2; flex: 1 0 100%; min-width: 0; max-width: 100%; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+        scrollbar-width: none; justify-content: flex-start; overscroll-behavior-x: contain; padding: 6px 4px 6px 10px; margin: -4px 0 -4px -10px; flex-basis: calc(100% + 10px); max-width: calc(100% + 10px); }
+    .hud.heroes-below > .hud-heroes::-webkit-scrollbar { display: none; }
+    .hud.heroes-below > .hud-heroes > .herocard { flex: none; }
+    .hud.heroes-below > .seg { margin-left: auto; }
+    .hud.heroes-below { min-width: 0; }
+}
