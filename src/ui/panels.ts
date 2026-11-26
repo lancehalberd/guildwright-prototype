@@ -476,6 +476,11 @@ function adventurerPanel(ctx: Ctx, adventurer: Adventurer): HTMLElement {
                 if (!changed.length) ctx.toast(`Nothing better for ${adventurer.name} right now`);
                 ctx.refresh();
             }}, 'Auto equip'),
+            h('button', {class: 'btn small', title: `Take off everything ${adventurer.name} wears and put it back in storage.`,
+                disabled: !slotOrder.some(slot => adventurer.equipment[slot]), onclick: () => {
+                    for (const slot of slotOrder) unequip(state, adventurer, slot);
+                    ctx.refresh();
+                }}, 'Remove all'),
         ),
         h('div', {class: 'list'},
             ...slotOrder.map(slot => {
