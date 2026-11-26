@@ -1720,3 +1720,13 @@ body.no-item-icons .craftedbody .mods, body.no-item-icons .gearopt .mods { font-
 .signature { color: var(--tier-l); font-size: 12px; line-height: 1.35; margin-top: 2px; }
 .signature b { font-weight: 700; }
 .signature.sigtag { display: inline; font-size: inherit; font-weight: 600; margin: 0; }
+
+/* v336: bar numbers sized per scale in plain px, not calc(px / var(--k)), so they grow with the bar
+   in every browser's zoom (some didn't apply zoom to the calc() font size, leaving them tiny).
+   About 15px on a 19px bar at 2x and 3x. */
+.arena.big .bar > .hpnum { font-size: 14px; }
+.arena.big .bar.ward > .hpnum, .arena.big .monsters.many .bar > .hpnum { font-size: 12px; }
+[data-k="2"] .arena.big .bar > .hpnum { font-size: 7.5px; }
+[data-k="2"] .arena.big .bar.ward > .hpnum, [data-k="2"] .arena.big .monsters.many .bar > .hpnum { font-size: 6.5px; }
+[data-k="3"] .arena.big .bar > .hpnum { font-size: 5px; }
+[data-k="3"] .arena.big .bar.ward > .hpnum, [data-k="3"] .arena.big .monsters.many .bar > .hpnum { font-size: 4.5px; }

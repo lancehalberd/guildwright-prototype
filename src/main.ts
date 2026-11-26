@@ -1326,6 +1326,7 @@ function placeBattle() {
     // Zoom lays the arena out at full size; its own left and top are zoomed too, so they divide by k.
     Object.assign(combatView.el.style, {left: `${left / k}px`, top: `${top / k}px`, width: `${baseW}px`, zoom: String(k)});
     battleEl.style.setProperty('--k', String(k));
+    battleEl.dataset.k = String(k);
 }
 
 // Every frame: feed the open run panel's combat view, and drop events for anyone else.

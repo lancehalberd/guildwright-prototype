@@ -177,6 +177,7 @@ export function openPreview(parent: HTMLElement) {
         stage.classList.toggle('big', big);
         Object.assign(view.el.style, {left: `${Math.round((w - baseW * k) / 2) / k}px`, top: `${Math.max(0, Math.round((hgt - ARENA_H * k) / 2)) / k}px`, width: `${baseW}px`, zoom: String(k)});
         stage.style.setProperty('--k', String(k));
+        stage.dataset.k = String(k);
     };
 
     const drawClasses = () => {
