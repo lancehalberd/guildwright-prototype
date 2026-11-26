@@ -707,7 +707,7 @@ const list: MaterialDef[] = [
             shield: craft(4, 'capMixed', {armor: 0.5, blockChance: 1.4}, {maxHealth: 1}, {boost: MYTHIC}),
         },
         decoration: {shield: {blockChance: 0.03}, armor: {blockChance: 0.02}, accessory: {blockChance: 0.03}},
-        equip: {itemType: 'amulet', name: 'Thornheart Charm', stats: {blockChance: 0.15, maxHealth: 8}},
+        equip: {itemType: 'amulet', name: 'Thornheart Charm', stats: {blockChance: 0.15, maxHealth: 8}, signature: 'livingBramble'},
     },
     {
         key: 'wolfkingPelt', name: 'Wolfking Pelt', prefix: 'Wolfking', power: 4,
@@ -717,7 +717,7 @@ const list: MaterialDef[] = [
             boots: craft(4, 'balanced', {evasion: 1}, {attackSpeed: 1}, {boost: MYTHIC, attr: 'dex'}),
         },
         decoration: {boots: {attackSpeed: 0.04}, armor: {evasion: 4, maxHealth: 5}},
-        equip: {itemType: 'bodyArmor', name: 'Wolfking Mantle', stats: {evasion: 8, attackSpeed: 0.08, accuracy: 6}},
+        equip: {itemType: 'bodyArmor', name: 'Wolfking Mantle', stats: {evasion: 8, attackSpeed: 0.08, accuracy: 6}, signature: 'packLeader'},
     },
     {
         key: 'deepfireCore', name: 'Deepfire Core', prefix: 'Deepfire', power: 6,
@@ -726,7 +726,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {fireDamage: [8, 16], fireResist: 0.15}, 3),
         },
         decoration: {weapon: {increasedElementalDamage: 0.15, physicalToFire: 0.3}, armor: {fireResist: 0.12}},
-        equip: {itemType: 'ring', name: 'Deepfire Ring', stats: {fireDamage: 8, fireResist: 0.15}},
+        equip: {itemType: 'ring', name: 'Deepfire Ring', stats: {fireDamage: 8, fireResist: 0.15}, signature: 'neverCools'},
     },
     {
         key: 'golemHeart', name: 'Golem Heart', prefix: 'Golemheart', power: 6,
@@ -735,7 +735,7 @@ const list: MaterialDef[] = [
             belt: withStats(craft(6, 'balanced', {armor: 1}, {}, {attr: 'str'}), {increasedMaxHealth: 0.1}),
         },
         decoration: {armor: {increasedArmor: 0.1}, belt: {increasedMaxHealth: 0.06}},
-        equip: {itemType: 'belt', name: 'Golem Heart Girdle', stats: {armor: 12, increasedMaxHealth: 0.1}},
+        equip: {itemType: 'belt', name: 'Golem Heart Girdle', stats: {armor: 12, increasedMaxHealth: 0.1}, signature: 'stoneSkin'},
     },
     // ---- Ashen Peaks: fire resistance, armor and cold damage, for answering fire and armored foes. ----
     {
@@ -810,7 +810,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {lifeRegen: 24, fireResist: 0.15}, 3),
         },
         decoration: {weapon: {healthAsFire: defenseAsDamage('healthAsFire', 7)}, armor: {lifeRegen: 16}, accessory: {lifeRegen: 16}},
-        equip: {itemType: 'amulet', name: 'Phoenix Charm', stats: {lifeRegen: 30, fireResist: 0.2}},
+        equip: {itemType: 'amulet', name: 'Phoenix Charm', stats: {lifeRegen: 30, fireResist: 0.2}, signature: 'rebirth'},
     },
     {
         key: 'blackPearl', name: 'Black Pearl', prefix: 'Black Pearl', power: 7,
@@ -819,7 +819,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {lifeRegenPercent: 0.018, lightningResist: 0.18}, 4),
         },
         decoration: {weapon: {lifeOnHit: 2}, accessory: {accuracy: 15}},
-        equip: {itemType: 'ring', name: 'Black Pearl Ring', stats: {lifeLeech: 0.05, accuracy: 25, lightningResist: 0.2}},
+        equip: {itemType: 'ring', name: 'Black Pearl Ring', stats: {lifeLeech: 0.05, accuracy: 25, lightningResist: 0.2}, signature: 'drinksStrength'},
     },
     {
         key: 'tempestQuill', name: 'Tempest Quill', prefix: 'Tempest', power: 7,
@@ -828,7 +828,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {attackSpeed: 0.09, dex: 7}, 4),
         },
         decoration: {weapon: {attackSpeed: 0.06}, accessory: {fireResist: 0.08}},
-        equip: {itemType: 'amulet', name: 'Tempest Charm', stats: {attackSpeed: 0.1, evasion: 50, fireResist: 0.15, wardOnDodgePercent: 0.05}},
+        equip: {itemType: 'amulet', name: 'Tempest Charm', stats: {attackSpeed: 0.1, evasion: 50, fireResist: 0.15, wardOnDodgePercent: 0.05}, signature: 'tailwind'},
     },
     // ---- Tier 4, the Sundered Sanctum: all three elements at once, so every resistance matters. ----
     {
@@ -911,7 +911,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {increasedElementalDamage: 0.18, critChance: 0.08}, 5),
         },
         decoration: {weapon: {increasedElementalDamage: 0.12}, accessory: {fireResist: 0.06, coldResist: 0.06, lightningResist: 0.06}},
-        equip: {itemType: 'amulet', name: 'Prismatic Eye', stats: {increasedElementalDamage: 0.2, ailmentEffect: 0.25, fireResist: 0.15, coldResist: 0.15, lightningResist: 0.15}},
+        equip: {itemType: 'amulet', name: 'Prismatic Eye', stats: {increasedElementalDamage: 0.2, ailmentEffect: 0.25, fireResist: 0.15, coldResist: 0.15, lightningResist: 0.15}, signature: 'seesAllStorms'},
     },
     // ---- Tier 5, the Amber Hive: Corrosion. Swarms of quick strikers, so avoiding hits matters most. ----
     {
@@ -990,7 +990,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {blockChance: 0.08, increasedEvasion: 0.15}, 6),
         },
         decoration: {armor: {evasion: 16, blockChance: 0.03}, accessory: {evasion: 16}},
-        equip: {itemType: 'ring', name: 'Hiveheart Signet', stats: {evasion: 150, blockChance: 0.08, attackSpeed: 0.08}},
+        equip: {itemType: 'ring', name: 'Hiveheart Signet', stats: {evasion: 150, blockChance: 0.08, attackSpeed: 0.08}, signature: 'hiveAnswers'},
     },
     // ---- Tier 5, Duskgrave Necropolis: Lifeless. Nothing heals, so a deep pool of life and ward wins. ----
     {
@@ -1074,7 +1074,8 @@ const list: MaterialDef[] = [
             amulet: accessory('paired', {increasedMaxHealth: 0.15, ward: amuletWard(13)}, 6),
         },
         decoration: {weapon: {lifeOnHit: 16}, armor: {increasedMaxHealth: 0.08, coldResist: 0.08}, accessory: {ward: 9, increasedMaxHealth: 0.03}},
-        equip: {itemType: 'amulet', name: 'Pale Crown Pendant', stats: {increasedMaxHealth: 0.15, ward: 120, coldResist: 0.2}},
+        // A crown, so it's worn as a helmet (an amulet before v334).
+        equip: {itemType: 'helmet', name: 'The Pale Crown', stats: {increasedMaxHealth: 0.15, ward: 120, coldResist: 0.2}, signature: 'deathHeldIn'},
     },
     // ---- Tier 5, the Ironbound Foundry: Reflection. Every blow comes back, so measured hits and tough hides win. ----
     {
@@ -1154,7 +1155,8 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {lifeRegen: 108, increasedArmor: 0.2}, 6),
         },
         decoration: {armor: {lifeRegen: 80, increasedArmor: 0.05}, accessory: {lifeRegen: 80}},
-        equip: {itemType: 'amulet', name: 'Forgeheart Locket', stats: {lifeRegen: 200, increasedArmor: 0.2, fireResist: 0.2}},
+        // Worn as body armor (an amulet before v334).
+        equip: {itemType: 'bodyArmor', name: 'Forgeheart Cuirass', stats: {lifeRegen: 200, increasedArmor: 0.2, fireResist: 0.2}, signature: 'titansFurnace'},
     },
     // ---- Tier 5, Skyspire Aerie: Karma. Every blow struck is judged, so the fewest, biggest blows win. ----
     {
@@ -1235,7 +1237,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {critMultiplier: 0.5, increasedDamage: 0.2}, 6),
         },
         decoration: {weapon: {critMultiplier: 0.3}, accessory: {increasedDamage: 0.115}},
-        equip: {itemType: 'ring', name: 'Stormcrown Band', stats: {critMultiplier: 0.5, increasedDamage: 0.2, critChance: 0.2}},
+        equip: {itemType: 'ring', name: 'Stormcrown Band', stats: {critMultiplier: 0.5, increasedDamage: 0.2, critChance: 0.2}, signature: 'strikesOnce'},
     },
     // ---- The Oracle's Rite: the Veiled Oracle's drops, a step above tier 5's mythics. ----
     {
@@ -1245,7 +1247,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {critChance: 0.12, accuracy: 160}, 6),
         },
         decoration: {weapon: {critChance: 0.06, accuracy: 50}, accessory: {accuracy: 60}},
-        equip: {itemType: 'amulet', name: 'Oracle\'s Eye', stats: {critChance: 0.3, accuracy: 200, critMultiplier: 0.3}},
+        equip: {itemType: 'amulet', name: 'Oracle\'s Eye', stats: {critChance: 0.3, accuracy: 200, critMultiplier: 0.3}, signature: 'foresight'},
     },
     {
         key: 'veilSilk', name: 'Veil Silk', prefix: 'Veiled', power: 14,
@@ -1255,6 +1257,7 @@ const list: MaterialDef[] = [
             bodyArmor: craft(14, 'balanced', {evasion: 0.5, ward: 0.5}, {fireResist: 0.34, coldResist: 0.33, lightningResist: 0.33}, {boost: 1.15, itemLabel: 'Veil'}),
         },
         decoration: {armor: {evasion: 18, ward: 5.5}, accessory: {ward: 12}},
+        equip: {itemType: 'ring', name: 'Veilsilk Band', stats: {evasion: 120, ward: 40}, signature: 'neverThere'},
     },
     {
         key: 'sanctumShard', name: 'Sanctum Shard', prefix: 'Sanctified', power: 14,
@@ -1264,6 +1267,7 @@ const list: MaterialDef[] = [
             shield: craft(14, 'capMixed', {armor: 1, blockChance: 1}, {maxHealth: 1}, {boost: 1.15}),
         },
         decoration: {weapon: {physicalDamage: 18, increasedDamage: 0.08}, shield: {blockChance: 0.04, ward: 8}},
+        equip: {itemType: 'sword', name: 'Sanctum Blade', stats: {physicalDamage: 200, accuracy: 60}, signature: 'doorsForce'},
     },
     // ---- Tier 6, the Shattered Throne: past the portal. No single rule; every kind of monster at once. ----
     {
@@ -1344,7 +1348,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {increasedDamage: 0.25, increasedMaxHealth: 0.2, lifeOnHit: 36}, 7),
         },
         decoration: {weapon: {increasedDamage: 0.12, lifeOnHit: 12}, armor: {increasedMaxHealth: 0.14}, accessory: {increasedDamage: 0.1, lifeOnHit: 10}},
-        equip: {itemType: 'amulet', name: 'Throneheart', stats: {increasedDamage: 0.3, increasedMaxHealth: 0.2, critChance: 0.2, lifeOnHit: 40}},
+        equip: {itemType: 'amulet', name: 'Throneheart', stats: {increasedDamage: 0.3, increasedMaxHealth: 0.2, critChance: 0.2, lifeOnHit: 40}, signature: 'risingWill'},
     },
     // Keys: no crafting use. A set of all four opens the way to the final area (see engine/portal.ts).
     {
@@ -1372,7 +1376,7 @@ const list: MaterialDef[] = [
             weapon: craft(5, 'secondary', {physicalDamage: 1}, {lifeOnHit: 1}, {boost: LEGENDARY}),
         },
         decoration: {weapon: {lifeOnHit: 1, attackSpeed: 0.03}, armor: {maxHealth: 9}, accessory: {lifeOnHit: 1}},
-        equip: {itemType: 'amulet', name: 'Briarcrown Circlet', stats: {lifeOnHit: 5, maxHealth: 15, blockChance: 0.05}},
+        equip: {itemType: 'amulet', name: 'Briarcrown Circlet', stats: {lifeOnHit: 5, maxHealth: 15, blockChance: 0.05}, signature: 'briarcrown'},
     },
     {
         key: 'stormveinHeart', name: 'Stormvein Heart', prefix: 'Stormvein', power: 7, legendary: true,
@@ -1382,7 +1386,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {lightningDamage: [9, 18], lightningResist: 0.15}, 3),
         },
         decoration: {weapon: {physicalToLightning: 0.4, increasedElementalDamage: 0.15}, armor: {lightningResist: 0.15}},
-        equip: {itemType: 'ring', name: 'Stormvein Ring', stats: {lightningDamage: 12, attackSpeed: 0.08, lightningResist: 0.2}},
+        equip: {itemType: 'ring', name: 'Stormvein Ring', stats: {lightningDamage: 12, attackSpeed: 0.08, lightningResist: 0.2}, signature: 'capacitor'},
     },
     {
         key: 'wyrmqueenEmber', name: 'Wyrmqueen\'s Ember', prefix: 'Wyrmqueen', power: 8, legendary: true,
@@ -1392,7 +1396,7 @@ const list: MaterialDef[] = [
             armor: craft(8, 'capMixed', {armor: 1}, {fireResist: 0.5, maxHealth: 0.5}, {boost: LEGENDARY}),
         },
         decoration: {weapon: {critMultiplier: 0.3, physicalToFire: 0.4}, armor: {fireResist: 0.12, maxHealth: 15}},
-        equip: {itemType: 'amulet', name: 'Ember of the Wyrmqueen', stats: {critChance: 0.2, critMultiplier: 0.4, fireResist: 0.25}},
+        equip: {itemType: 'amulet', name: 'Ember of the Wyrmqueen', stats: {critChance: 0.2, critMultiplier: 0.4, fireResist: 0.25}, signature: 'weakSpot'},
     },
     {
         key: 'mireheart', name: 'Heart of the Mire', prefix: 'Mireheart', power: 8, legendary: true,
@@ -1403,7 +1407,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {coldResist: 0.15, accuracy: 30}, 3),
         },
         decoration: {weapon: {lifeOnHit: 3, physicalToCold: 0.4}, armor: {coldResist: 0.12, lifeRegen: 24}, accessory: {evasionAsCold: defenseAsDamage('evasionAsCold', 8)}},
-        equip: {itemType: 'amulet', name: 'Mireheart Locket', stats: {lifeLeech: 0.05, accuracy: 40, coldResist: 0.25}},
+        equip: {itemType: 'amulet', name: 'Mireheart Locket', stats: {lifeLeech: 0.05, accuracy: 40, coldResist: 0.25}, signature: 'neverHungry'},
     },
     {
         key: 'tempestTalon', name: 'Tempest Talon', prefix: 'Tempest', power: 8, legendary: true,
@@ -1413,7 +1417,8 @@ const list: MaterialDef[] = [
             shield: craft(8, 'capMixed', {blockChance: 1}, {lightningResist: 0.5, attackSpeed: 0.5}, {boost: LEGENDARY}),
         },
         decoration: {weapon: {attackSpeed: 0.08, physicalToLightning: 0.4}, armor: {evasion: 8, lightningResist: 0.1}},
-        equip: {itemType: 'ring', name: 'Talon of the Tempest', stats: {attackSpeed: 0.1, evasion: 40, blockChance: 0.05}},
+        // Worn as a dagger with no flat damage (a ring before v334); the signature adds the speed.
+        equip: {itemType: 'dagger', name: 'Talon of the Tempest', stats: {attackSpeed: 0.1, evasion: 40, blockChance: 0.05}, signature: 'tempestTalon'},
     },
     {
         key: 'riftheart', name: 'Heart of the Rift', prefix: 'Riftheart', power: 10, legendary: true,
@@ -1423,7 +1428,7 @@ const list: MaterialDef[] = [
             armor: craft(10, 'capMixed', {ward: 1}, {fireResist: 0.34, coldResist: 0.33, lightningResist: 0.33}, {boost: LEGENDARY}),
         },
         decoration: {weapon: {physicalToFire: 0.15, physicalToCold: 0.15, physicalToLightning: 0.15}, armor: {fireResist: 0.1, coldResist: 0.1, lightningResist: 0.1}},
-        equip: {itemType: 'ring', name: 'Heart of the Rift', stats: {increasedElementalDamage: 0.25, fireResist: 0.2, coldResist: 0.2, lightningResist: 0.2}},
+        equip: {itemType: 'ring', name: 'Heart of the Rift', stats: {increasedElementalDamage: 0.25, fireResist: 0.2, coldResist: 0.2, lightningResist: 0.2}, signature: 'unsettled'},
     },
     {
         key: 'empressStinger', name: 'Empress\'s Stinger', prefix: 'Empress', power: 14, legendary: true,
@@ -1433,7 +1438,7 @@ const list: MaterialDef[] = [
             armor: craft(14, 'capMixed', {evasion: 1}, {attackSpeed: 0.5, fireResist: 0.5}, {boost: LEGENDARY}),
         },
         decoration: {weapon: {igniteChance: 0.1, attackSpeed: 0.08}, armor: {evasion: 18}, accessory: {igniteChance: 0.08}},
-        equip: {itemType: 'ring', name: 'Signet of the Empress', stats: {evasion: 180, attackSpeed: 0.1, igniteChance: 0.15}},
+        equip: {itemType: 'ring', name: 'Signet of the Empress', stats: {evasion: 180, attackSpeed: 0.1, igniteChance: 0.15}, signature: 'swarmVenom'},
     },
     {
         key: 'regentPhylactery', name: 'Regent\'s Phylactery', prefix: 'Regent', power: 14, legendary: true,
@@ -1444,7 +1449,7 @@ const list: MaterialDef[] = [
             amulet: accessory('paired', {maxHealth: 80, ward: amuletWard(14, 1.25)}, 6),
         },
         decoration: {armor: {maxHealth: 20, ward: 5.5}, accessory: {increasedMaxHealth: 0.12}, weapon: {chillChance: 0.1}},
-        equip: {itemType: 'amulet', name: 'Phylactery of the Regent', stats: {increasedMaxHealth: 0.15, ward: 100, chillChance: 0.15, lifeOnHit: 30}},
+        equip: {itemType: 'amulet', name: 'Phylactery of the Regent', stats: {increasedMaxHealth: 0.15, ward: 100, chillChance: 0.15, lifeOnHit: 30}, signature: 'nightFrost'},
     },
     {
         key: 'overseerSeal', name: 'Overseer\'s Seal', prefix: 'Overseer', power: 14, legendary: true,
@@ -1454,7 +1459,7 @@ const list: MaterialDef[] = [
             weapon: craft(14, 'balanced', {physicalDamage: 1}, {accuracy: 1}, {boost: LEGENDARY}),
         },
         decoration: {weapon: {critMultiplier: 0.2, accuracy: 25}, shield: {blockChance: 0.09}, armor: {armor: 18}},
-        equip: {itemType: 'amulet', name: 'Seal of the Overseer', stats: {blockChance: 0.1, increasedArmor: 0.25, critMultiplier: 0.4}},
+        equip: {itemType: 'amulet', name: 'Seal of the Overseer', stats: {blockChance: 0.1, increasedArmor: 0.25, critMultiplier: 0.4}, signature: 'madeToLast'},
     },
     {
         key: 'heraldBolt', name: 'Herald\'s Thunderbolt', prefix: 'Herald', power: 14, legendary: true,
@@ -1464,7 +1469,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {critMultiplier: 0.4, shockChance: 0.15}, 6),
         },
         decoration: {weapon: {critMultiplier: 0.3, physicalToLightning: 0.4}, accessory: {shockChance: 0.08}},
-        equip: {itemType: 'ring', name: 'Ring of the Herald', stats: {critMultiplier: 0.5, lightningDamage: 30, shockChance: 0.15}},
+        equip: {itemType: 'ring', name: 'Ring of the Herald', stats: {critMultiplier: 0.5, lightningDamage: 30, shockChance: 0.15}, signature: 'perfectStrike'},
     },
     {
         // Power 15 like the Throne's mythic (the tables stop there), with a bigger boost to stay a step above it.
@@ -1475,7 +1480,7 @@ const list: MaterialDef[] = [
             accessory: accessory('paired', {increasedDamage: 0.3, attackSpeed: 0.12}, 7),
         },
         decoration: {weapon: {increasedDamage: 0.2}, armor: {maxHealth: 25}, accessory: {attackSpeed: 0.1}},
-        equip: {itemType: 'amulet', name: 'The Borrowed Crown', stats: {increasedDamage: 0.35, attackSpeed: 0.12, increasedMaxHealth: 0.15}},
+        equip: {itemType: 'amulet', name: 'The Borrowed Crown', stats: {increasedDamage: 0.35, attackSpeed: 0.12, increasedMaxHealth: 0.15}, signature: 'pretendersClaim'},
     },
     ...gemMaterials(),
 ];

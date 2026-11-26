@@ -3,7 +3,8 @@ import {requireMaterial} from '../data/materials';
 import {classes, quests, unlockMet} from '../data/quests';
 import {previewCraft} from './crafting';
 import {getSellValue} from './crafting';
-import {getAdventurerStats, invalidateStats, isTwoHandedEquipped, resolveItemRef, totalXpForLevel} from './stats';
+import {effectiveLevel, getAdventurerStats, invalidateStats, isTwoHandedEquipped, resolveItemRef, totalXpForLevel} from './stats';
+import {BRIAR_LEVELS} from '../data/signatures';
 import {expansions, slotUnlocks, unlockFame, startingGuild, trackNames, type Expansion, type SlotTrack, type SlotUnlock} from '../data/milestones';
 import {trophyList, tierFor, MAX_TROPHY_SLOTS} from '../data/trophies';
 import {applicantSlotFame, applicantSlots, checkAmbitions, ambitionText, ensureApplicants, retireFame, emptyRecords, rollStarters} from './ambitions';
@@ -356,7 +357,24 @@ export function unequip(state: GameState, adventurer: Adventurer, slot: SlotKey)
         state.materials[ref.key] = (state.materials[ref.key] ?? 0) + 1;
     }
     delete adventurer.equipment[slot];
+    // Briarcrown's effective levels go with it: gear the hero no longer meets comes off too.
+    if (ref.kind === 'material' && requireMaterial(ref.key).equip?.signature === 'briarcrown') dropUnwearable(state, adventurer);
     clampHp(state, adventurer);
+}
+
+// Takes off every item the adventurer's (effective) level no longer allows.
+export function dropUnwearable(state: GameState, adventurer: Adventurer) {
+    for (const slot of slotOrder) {
+        const ref = adventurer.equipment[slot];
+        if (ref && itemLevelRequirement(state, ref) > effectiveLevel(adventurer)) unequip(state, adventurer, slot);
+    }
+}
+
+// The effective level the adventurer would have with `ref` in `slot` instead of what's there now.
+function levelWith(adventurer: Adventurer, ref: ItemRef, slot: SlotKey): number {
+    const isBriar = (r: ItemRef | undefined) => r?.kind === 'material' && requireMaterial(r.key).equip?.signature === 'briarcrown';
+    const others = Object.entries(adventurer.equipment).some(([s, r]) => s !== slot && isBriar(r));
+    return adventurer.level + (others || isBriar(ref) ? BRIAR_LEVELS : 0);
 }
 
 // Gear needs a level from the strongest material in it, so a new member can't wear the guild's best
@@ -383,7 +401,7 @@ export function canEquipInSlot(state: GameState, adventurer: Adventurer, ref: It
     if (!item || !itemTypes[item.itemType].slots.includes(slot)) {
         return false;
     }
-    if (!ignoreLevel && adventurer.level < itemLevelRequirement(state, ref)) {
+    if (!ignoreLevel && levelWith(adventurer, ref, slot) < itemLevelRequirement(state, ref)) {
         return false;
     }
     if (slot === 'offHand' && isTwoHandedEquipped(state, adventurer)) {

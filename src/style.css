@@ -1715,3 +1715,8 @@ body.no-item-icons .craftedbody .mods, body.no-item-icons .gearopt .mods { font-
 .ledgersearch { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); width: 11em; min-width: 0; }
 .ledgersearch:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .trophypicklist .item.emptyslot { align-items: center; }
+
+/* A worn legendary or mythic's signature effect (data/signatures.ts). */
+.signature { color: var(--tier-l); font-size: 12px; line-height: 1.35; margin-top: 2px; }
+.signature b { font-weight: 700; }
+.signature.sigtag { display: inline; font-size: inherit; font-weight: 600; margin: 0; }

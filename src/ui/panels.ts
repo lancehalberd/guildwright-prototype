@@ -17,9 +17,10 @@ import {expansions, slotUnlocks, trackNames, unlockFame, type SlotTrack} from '.
 import {earnedText, equippedBonuses, MAX_TROPHY_SLOTS, tierFor, trophies, trophyList, trophyTierName, type TrophyDef} from '../data/trophies';
 import {challengeModifier, TRIAL_MONSTER, TRIAL_PREMIUM, TRIAL_STEP, VOID_KEY, VOID_MONSTER, VOID_PREMIUM} from '../data/modifiers';
 import {trophyBanner, trophyCase, trophyLabel} from './trophyArt';
-import {BLOCK_CAP, expectedCritMultiplier, expectedHits, getCachedStats, hitChance, hitRating, mitigateHit, resolveItemRef, RESIST_CAP, totalXpForLevel} from '../engine/stats';
+import {BLOCK_CAP, effectiveLevel, wornSignatures, expectedCritMultiplier, expectedHits, getCachedStats, hitChance, hitRating, mitigateHit, resolveItemRef, RESIST_CAP, totalXpForLevel} from '../engine/stats';
 import type {Adventurer, BaseStats, CraftedItem, MaterialDef, DamageMap, DamageType, GameState, ItemRef, ItemStats, ItemTypeKey, ModValue, MonsterModStat, QuestDef, QuestModifierDef, RewardBonuses, RunStats, SlotKey, StatKey, Tier} from '../engine/types';
 import {fmt, h, num, type Listened} from './dom';
+import {signatures} from '../data/signatures';
 import {bestDelta, deltaColumn, deltaLine, deltaLines} from './compareView';
 import {autoEquip} from '../engine/autoEquip';
 import {comparisonSlots} from '../engine/compare';
@@ -27,7 +28,7 @@ import {BENCH_PRICE, buyBench, buyShopItem, hasBench, refreshShop, restockSold, 
 import {APPLICANT_SLOTS, FOURTH_APPLICANT_EXPANSION, THIRD_APPLICANT_EXPANSION, applicantSlotFame, applicantSlots, ambitionHint, ambitionProgress, ambitionText, ambitionTierNames, applicantTierOdds, ensureApplicants, guildTier, TIER_FAME, tierStartFame, refreshApplicants, refreshCost, RETIRE_MULTIPLIER, retireFame} from '../engine/ambitions';
 import {contractHolder, contractRewardText, contractText, dropContract, ensureGuildContracts, ensurePersonalContract, findContract, grantedModifiers, guildRefreshCost, personalRefreshCost, refreshGuildContract, refreshPersonalContract, takeContract} from '../engine/contracts';
 import type {Ambition, Applicant, Contract, HeroPassive} from '../engine/types';
-import {bloodPactBonus, bonusText as rareBonusText, cursePremium, curseText, passiveScale, passives as passiveDefs, type BonusKey, type PassiveKey} from '../data/passives';
+import {bloodPactBonus, ENHANCED_EFFECT, bonusText as rareBonusText, cursePremium, curseText, passiveScale, passives as passiveDefs, type BonusKey, type PassiveKey} from '../data/passives';
 import {buyOffer, HOLD_BASE, holdCost, holdOffer, offerPrice, PEDDLER_UNLOCK, peddlerHere, RARE_FOUND, releaseOffer, VISIT_GAP, VISIT_SECONDS} from '../engine/peddler';
 import {corrosionFactor, REFLECT_SHARE, ruleInfo} from '../engine/rules';
 import {PORTAL_SECONDS, portalSecondsLeft} from '../engine/portal';
@@ -283,6 +284,22 @@ function panelShell(ctx: Ctx, side: 'left' | 'right', title: string, subtitle: s
     );
 }
 
+// A worn legendary or mythic's signature effect (data/signatures.ts), as a line under its stats.
+export function signatureLine(ref: ItemRef | undefined): HTMLElement | null {
+    if (ref?.kind !== 'material') return null;
+    const key = requireMaterial(ref.key).equip?.signature;
+    if (!key) return null;
+    const sig = signatures[key];
+    return h('div', {class: 'signature', title: `${sig.name}: ${sig.text}`}, h('b', null, sig.name + '. '), sig.text);
+}
+
+// Just the signature's name, for tight rows; the full text is its tooltip.
+function signatureTag(ref: ItemRef | undefined): HTMLElement | null {
+    if (ref?.kind !== 'material') return null;
+    const key = requireMaterial(ref.key).equip?.signature;
+    return key ? h('span', {class: 'signature sigtag', title: `${signatures[key].name}: ${signatures[key].text}`}, ' · ' + signatures[key].name) : null;
+}
+
 export function itemStatsText(stats: ItemStats): string {
     const parts: string[] = [];
     const text = formatStats(stats.stats);
@@ -474,7 +491,7 @@ function adventurerPanel(ctx: Ctx, adventurer: Adventurer): HTMLElement {
                 },
                 h('span', {class: 'slot-art' + (item ? '' : ' empty')}, !ref ? itemTypeArt(emptySlotType(adventurer, slot)) : ref.kind === 'material' ? materialIcon(ref.key, 'typeart') : itemArt(item!.itemType, state.craftedItems.find(c => c.id === ref.id)?.base)),
                 h('span', {class: 'grow'},
-                    item ? h('div', {class: 'equipname', title: item.name}, h('span', {class: 'lvtag lvpre', title: `Requires level ${itemLevelRequirement(state, ref!)}`}, `Lv ${itemLevelRequirement(state, ref!)} `), item.name, ref?.kind === 'material' ? h('span', {class: 'muted small'}, ' (material)') : null) : h('div', {class: 'muted equipname'}, `${slotNames[slot]}: ${blocked ? 'blocked by two-handed weapon' : 'empty'}`),
+                    item ? h('div', {class: 'equipname', title: item.name}, h('span', {class: 'lvtag lvpre', title: `Requires level ${itemLevelRequirement(state, ref!)}`}, `Lv ${itemLevelRequirement(state, ref!)} `), item.name, ref?.kind === 'material' ? h('span', {class: 'muted small'}, ' (material)') : null, signatureTag(ref)) : h('div', {class: 'muted equipname'}, `${slotNames[slot]}: ${blocked ? 'blocked by two-handed weapon' : 'empty'}`),
                     item ? h('div', {class: 'mods equipmods', title: itemStatsText(item.stats)}, itemStatsText(item.stats)) : null,
                 ));
                 // Take off without opening the picker.
@@ -1083,7 +1100,7 @@ export function renderGearPanel(ctx: Ctx): HTMLElement | null {
 function hasFreeGear(state: GameState, adventurer: Adventurer, slot: SlotKey): boolean {
     return state.craftedItems.some(item => {
         const ref: ItemRef = {kind: 'crafted', id: item.id};
-        return !isItemEquipped(state, item.id) && canEquipInSlot(state, adventurer, ref, slot, true) && adventurer.level >= itemLevelRequirement(state, ref);
+        return !isItemEquipped(state, item.id) && canEquipInSlot(state, adventurer, ref, slot, true) && effectiveLevel(adventurer) >= itemLevelRequirement(state, ref);
     });
 }
 
@@ -1138,9 +1155,9 @@ function slotChooser(ctx: Ctx, adventurer: Adventurer, slot: SlotKey): HTMLEleme
                 const crafted = option.ref.kind === 'crafted' ? state.craftedItems.find(c => c.id === (option.ref as {id: string}).id) : undefined;
                 const pick = h('button', {
                 class: 'item gearopt' + (crafted ? ' grow' : ''),
-                'data-guide': crafted && adventurer.level >= itemLevelRequirement(state, option.ref) ? 'equip' : undefined,
+                'data-guide': crafted && canEquipInSlot(state, adventurer, option.ref, slot) ? 'equip' : undefined,
                 id: option.ref.kind === 'material' ? 'gearopt-' + option.ref.key : undefined,
-                disabled: adventurer.level < itemLevelRequirement(state, option.ref),
+                disabled: !canEquipInSlot(state, adventurer, option.ref, slot),
                 onclick: () => {
                     if (equip(state, adventurer, option.ref, slot)) {
                         ctx.ui.selectedSlot = null;
@@ -1151,8 +1168,9 @@ function slotChooser(ctx: Ctx, adventurer: Adventurer, slot: SlotKey): HTMLEleme
             }, h('span', {class: 'rowart listart'}, crafted ? itemArt(crafted.itemType, crafted.base) : option.ref.kind === 'material' ? materialIcon(option.ref.key, 'typeart') : null),
             h('span', {class: 'grow'},
                 h('div', null, option.name, h('span', {class: 'muted small'}, ' · ' + option.note),
-                    levelTag(itemLevelRequirement(state, option.ref), adventurer.level)),
+                    levelTag(itemLevelRequirement(state, option.ref), effectiveLevel(adventurer))),
                 h('div', {class: 'mods'}, itemStatsText(option.stats)),
+                signatureLine(option.ref),
                 deltaLine(state, adventurer, slot, option.ref),
             ));
                 const recraft = crafted ? recipeButton(ctx, crafted) : null;
@@ -2667,7 +2685,9 @@ function heroPassives(hero: {classKey: string, passives?: HeroPassive[], bonuses
     const c = classes[hero.classKey];
     // Effect scales: enhanced rolls and the guild's increased core passive effect. A passive reads
     // its base text unless it is scaled.
-    const increased = !state ? 0 : equippedBonuses(state).reduce((sum, b) => sum + (b.stats?.corePassiveEffect ?? 0), 0);
+    // The Borrowed Crown, worn, enhances every passive the hero has.
+    const crown = 'equipment' in hero && wornSignatures(hero as Adventurer).pretendersClaim ? ENHANCED_EFFECT : 0;
+    const increased = crown + (!state ? 0 : equippedBonuses(state).reduce((sum, b) => sum + (b.stats?.corePassiveEffect ?? 0), 0));
     const line = (key: PassiveKey, enhanced?: boolean) => h('div', null, h('strong', null, `${enhanced ? 'Enhanced ' : ''}${passiveDefs[key].name}: `), passiveDefs[key].text(passiveScale(hero, key, classPassive, increased)));
     const lines = hero.passives
         ? hero.passives.map(p => line(p.key, p.enhanced))

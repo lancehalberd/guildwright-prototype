@@ -7,7 +7,8 @@ import {APPLICANT_SLOTS, applicantSlotFame, applicantSlots} from './ambitions';
 import {invalidateStats} from './stats';
 import {maxDecorationPower} from './crafting';
 import {requireMaterial} from '../data/materials';
-import type {GameState} from './types';
+import {itemTypes} from '../data/items';
+import type {GameState, ItemRef, SlotKey} from './types';
 
 const SAVE_KEY = 'guild-crafting-mockup-save';
 
@@ -175,6 +176,17 @@ function fitToQuests(state: GameState): GameState {
     for (const app of state.applicants ?? []) replaceUnreachableAmbitions(app);
     for (const adventurer of state.adventurers) {
         giveAmbitions(state, adventurer);
+        // Materials worn in a slot their item type no longer uses (Tempest Talon, the Pale Crown and
+        // Forgeheart moved slots in v334) go back to storage.
+        for (const [slot, ref] of Object.entries(adventurer.equipment) as [SlotKey, ItemRef | undefined][]) {
+            if (ref?.kind !== 'material') continue;
+            const worn = requireMaterial(ref.key).equip;
+            if (worn && itemTypes[worn.itemType].slots.includes(slot)) continue;
+            delete adventurer.equipment[slot];
+            state.materials[ref.key] = (state.materials[ref.key] ?? 0) + 1;
+            (state.notices ??= []).push(`${adventurer.name}: ${worn?.name ?? requireMaterial(ref.key).name} is now worn in another slot, so it went back to your materials.`);
+            invalidateStats();
+        }
         const a = adventurer.activity;
         if (a.kind === 'fighting' && a.encounterIndex > quests[a.questKey].encounters.length - 1) {
             adventurer.activity = {kind: 'resting', questKey: a.questKey, remaining: 1, defeated: false};

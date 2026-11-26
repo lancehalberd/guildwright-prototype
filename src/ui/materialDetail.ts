@@ -7,6 +7,7 @@ import {canEquipInSlot, equip, getQuestProgress, itemLevelRequirement} from '../
 import {isTwoHandedEquipped} from '../engine/stats';
 import type {BaseStats, ItemRef, ItemTypeKey, MaterialDef, SlotKey, StatKey, StatValues, Tag, Tier} from '../engine/types';
 import {h, num} from './dom';
+import {signatureLine} from './panels';
 import {materialIcon} from './icons';
 import {deltaLine} from './compareView';
 import {hasBench} from '../engine/shop';
@@ -248,6 +249,7 @@ export function renderMaterialDetail(ctx: Ctx): HTMLElement | null {
                     h('div', {class: 'usage'},
                         h('div', {class: 'usage-types'}, `${material.equip.name} · ${itemTypes[material.equip.itemType].name}`),
                         h('div', null, [formatStats(equip.stats), equip.attacksPerSecond ? `${num(equip.attacksPerSecond)} attacks/s` : ''].filter(Boolean).join(' · ')),
+                        signatureLine({kind: 'material', key}),
                         equipRow(ctx, key, material.equip.itemType),
                     ),
                 ]) : null,

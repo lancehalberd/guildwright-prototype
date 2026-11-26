@@ -123,7 +123,7 @@ export function zoneWeights(base: Weights, questKey: string | null): Weights {
     const w = {...base};
     const profile = questKey ? zoneProfile(questKey) : null;
     for (const e of elements) {
-        w[resistStat[e]] = profile ? 160 * profile.incoming[e] : 35;
+        w[resistStat[e]] = Math.max(base[resistStat[e]] ?? 0, profile ? 160 * profile.incoming[e] : 35);
         const damageKey = `${e}Damage` as StatKey;
         if (profile && w[damageKey]) w[damageKey] = w[damageKey]! * (1 - profile.resist[e]);
     }

@@ -9,8 +9,9 @@ import {addLog, addMaterial, getActiveModifiers, getQuestProgress, isQuestUnlock
 import {bossAmbitionFor, records} from './ambitions';
 import {findContract, rollGuildContract, rollPersonalContract} from './contracts';
 import {applyMods} from './mods';
-import {ailmentSeconds, BLEED_SECONDS, MIN_DOT_DPS, BLIND_CAP, blindFactor, tickBleed, BURN_SECONDS, CHILL_CAP, SHOCK_CAP, SNARE_CAP, WEAKEN_CAP, weakenFactor, GALE_CAP, SUNDER_CAP, galeFactor, sunderFactor, inflict, shockFactor, slowFactor, tickAilments, type AilmentBonus} from './ailments';
+import {AILMENT_CHANCE, BURN_SHARE, ailmentSeconds, BLEED_SECONDS, MIN_DOT_DPS, BLIND_CAP, blindFactor, tickBleed, BURN_SECONDS, CHILL_CAP, SHOCK_CAP, SNARE_CAP, WEAKEN_CAP, weakenFactor, GALE_CAP, SUNDER_CAP, galeFactor, sunderFactor, inflict, shockFactor, slowFactor, tickAilments, type AilmentBonus} from './ailments';
 import {armorReduce, exposedEvasion, getCachedStats, hitChance, invalidateStats, levelCap, mitigateByType, mitigateDamage, penetrate, rollCritLevels, rollHits, totalXpForLevel} from './stats';
+import {BOLT_CRIT_LEVELS, BOLT_EVERY, BRAMBLE_BLOCK_SHARE, BRAMBLE_SHARE, CAPACITOR_HITS, CAPACITOR_SHOCK_MULT, DEATH_HELD_BYPASS, DRAIN_CAP, DRAIN_STEP, FURNACE_SHARE, HIVE_DAMAGE, NEVER_THERE_DODGE, REBIRTH_BURST, REBIRTH_LIFE, STONE_SKIN, STRIKES_ONCE_MORE, TAILWIND_SECONDS, TAILWIND_SPEED, VENOM_STACKS, WILL_CAP, WILL_EVERY, WILL_STEP, NIGHT_FROST_CHILL, type SignatureKey} from '../data/signatures';
 import {activeRules, corrode, corrosionFactor, corrosionStackChance, KARMA_DPS, REFLECT_SHARE} from './rules';
 // The takenBy key for reflected damage (monster keys never start with a colon).
 export const REFLECT_SOURCE = ':reflect';
@@ -905,6 +906,8 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     // Stacks keep working for the whole run, even after a rite moves on to other rules.
     const stats = corrode(getCachedStats(state, adventurer), run?.corrosion ?? 0);
     const rs = runStats(adventurer, quest.key);
+    // Signature effects of worn legendaries and mythics (data/signatures.ts).
+    const has = (key: SignatureKey) => (stats.signatures[key] ?? 0) > 0;
     // This encounter's line in the recap: damage taken and time fighting.
     const encounterEntry = () => {
         if (!rs) return undefined;
@@ -959,6 +962,13 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             gained = adventurer.ward - before;
             if (rs) rs.wardGained += gained;
         }
+        // Heart of the Mire: leech that would overheal fills ward, up to max ward.
+        if (leech && has('neverHungry') && adventurer.hp > 0 && amount > healed + gained) {
+            const before = adventurer.ward ?? 0;
+            adventurer.ward = Math.max(before, Math.min(stats.maxWard, before + amount - healed - gained));
+            if (rs) rs.wardGained += adventurer.ward - before;
+            gained += adventurer.ward - before;
+        }
         if (leech) recordRecovery(healed + gained);
         return healed;
     };
@@ -992,7 +1002,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     const threshold = monsterBaseline.hp * encounterPower(quest, activity.encounterIndex) * (quest.monsterScale ?? 1);
     // Exploit: burns last twice as long, and chill and shock build to 75%. Increased limits raise both.
     const limits = 1 + tg('increasedAilmentLimits');
-    const ailmentBonus: AilmentBonus = {chance: {burn: stats.gear.igniteChance ?? 0, chill: stats.gear.chillChance ?? 0, shock: stats.gear.shockChance ?? 0}, effect: stats.gear.ailmentEffect ?? 0,
+    const ailmentBonus: AilmentBonus = {chance: {burn: stats.gear.igniteChance ?? 0, chill: (stats.gear.chillChance ?? 0) + (has('nightFrost') ? NIGHT_FROST_CHILL : 0), shock: stats.gear.shockChance ?? 0}, effect: stats.gear.ailmentEffect ?? 0,
         chanceMore: tg('increasedAilmentChance'),
         burnSeconds: (exploitL ? 2 : 1) * BURN_SECONDS * limits, cap: (exploitL ? 0.75 : CHILL_CAP) * limits};
     // Ailments monsters put on the hero: some avoided outright, the rest weaker.
@@ -1013,10 +1023,10 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     };
     // Shatter: the damage a monster actually takes. Halved while its shards stand, and stopped at its
     // next threshold so a big hit can't skip a phase.
-    const hurt = (m: MonsterState, amount: number): number => {
+    const hurt = (m: MonsterState, amount: number, ignoreGuard = false): number => {
         amount *= 1 + hexFactor(m);
-        // Guard cuts the damage; a ward soaks what's left before life.
-        if (m.guard) amount *= 1 - m.guard.amount;
+        // Guard cuts the damage (not for Sanctum Blade hits); a ward soaks what's left before life.
+        if (m.guard && !ignoreGuard) amount *= 1 - m.guard.amount;
         if (m.ward) {
             const soaked = Math.min(m.ward, amount);
             m.ward = m.ward - soaked || undefined;
@@ -1068,6 +1078,44 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         activity.monsters.unshift(...spawned);
         addLog(state, quest.key, `${monsters[m.key].name} shatters: ${shatter.count} ${monsters[shatter.shard].name}s rise to guard him.`, 'info');
     };
+    // Damage from the hero that isn't an attack's hit (Living Bramble, Rebirth, Capacitor, Titan's
+    // Furnace): through the monster's armor and resistances, shock and Hex. Dead monsters stay in the
+    // line-up until clearFallen, so loops over it stay safe.
+    const strikeMonster = (m: MonsterState, dmg: DamageMap, ailment?: AilmentBonus, silent = false): number => {
+        if (m.hp <= 0) return 0;
+        const ms = getMonsterStats(quest, activity.encounterIndex, m.key, fightKeys(adventurer.run));
+        const resist = penetrate(ms.resist, stats.resistPenetration);
+        const byType = mitigateByType(dmg, ms.armor, resist);
+        const dealt = hurt(m, mitigateDamage(dmg, ms.armor, resist, rng) * shockFactor(m.ailments));
+        if (ailment) inflict(m.ailments ??= {}, byType, threshold, rng, ailment);
+        if (rs) addDamage(rs.dealt, byType, Math.min(dealt, Math.max(0, m.hp)));
+        m.hp -= dealt;
+        shatterCheck(m);
+        if (!silent || m.hp <= 0) pushCombat({adventurerId: adventurer.id, side: 'monster', slot: m.slot ?? 0, kind: 'hit', amount: silent ? 0 : dealt, hitIndex: 0, damageType: mainType(dmg), killed: m.hp <= 0, hpAfter: Math.max(0, m.hp) / m.maxHp, ...(silent ? {burn: true} : {})});
+        return dealt;
+    };
+    // Takes monsters at 0 HP out of the fight, counting the kills.
+    const clearFallen = () => {
+        const fallen = activity.monsters.filter(m => m.hp <= 0);
+        if (!fallen.length) return;
+        activity.monsters = activity.monsters.filter(m => m.hp > 0);
+        if (rs) rs.kills += fallen.length;
+    };
+    // Phoenix Feather: once per run, a killing blow leaves the hero at half HP and burns every monster.
+    const rebirth = (): boolean => {
+        if (!has('rebirth') || !run || run.reborn) return false;
+        run.reborn = true;
+        adventurer.hp = Math.max(1, Math.floor(REBIRTH_LIFE * stats.maxHealth));
+        addLog(state, quest.key, `${adventurer.name} rises from the ashes (Phoenix Feather).`, 'info');
+        for (const m of [...activity.monsters]) strikeMonster(m, {fire: REBIRTH_BURST * stats.maxHealth});
+        return true;
+    };
+    const dodgeChance = tg('dodgeChance') + (has('neverThere') ? NEVER_THERE_DODGE : 0);
+    // Dodges that pay a signature: Tempest Quill's speed and Hiveheart's free attacks.
+    const signatureDodge = () => {
+        if (has('tailwind')) (activity.tailwind ??= []).push(activity.clock ?? 0);
+        if (has('hiveAnswers')) activity.hiveCounters = (activity.hiveCounters ?? 0) + 1;
+    };
     // Burning on the hero: ward soaks it first, like any damage.
     const heroBurn = tickAilments(activity.heroAilments, dt) * shockFactor(activity.heroAilments) * dotTaken * (1 - tg('lessElementalDamageTaken'));
     if (heroBurn > 0) {
@@ -1080,7 +1128,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             rs.wardAbsorbed += absorbed;
             rs.lowestHp = Math.min(rs.lowestHp, Math.max(0, adventurer.hp) / stats.maxHealth);
         }
-        if (adventurer.hp <= 0) {
+        if (adventurer.hp <= 0 && !rebirth()) {
             defeat('burning');
             return;
         }
@@ -1097,7 +1145,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             rs.wardAbsorbed += absorbed;
             rs.lowestHp = Math.min(rs.lowestHp, Math.max(0, adventurer.hp) / stats.maxHealth);
         }
-        if (adventurer.hp <= 0) {
+        if (adventurer.hp <= 0 && !rebirth()) {
             defeat('bleeding');
             return;
         }
@@ -1117,10 +1165,32 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             rs.wardAbsorbed += absorbed;
             rs.lowestHp = Math.min(rs.lowestHp, Math.max(0, adventurer.hp) / stats.maxHealth);
         }
-        if (adventurer.hp <= 0) {
+        if (adventurer.hp <= 0 && !rebirth()) {
             defeat('Karma');
             return;
         }
+    }
+    // Titan's Furnace (Forgeheart): the hero and every monster burn each second for a share of the
+    // hero's max HP + max ward. The hero's part is cut by fire resistance, and ward soaks it first.
+    if (has('titansFurnace')) {
+        const pool = FURNACE_SHARE * (stats.maxHealth + stats.maxWard) * dt;
+        const self = pool * (1 - (stats.resist.fire ?? 0)) * (1 - tg('lessElementalDamageTaken')) * dotTaken;
+        const absorbed = Math.min(adventurer.ward ?? 0, self);
+        adventurer.ward = (adventurer.ward ?? 0) - absorbed;
+        adventurer.hp -= self - absorbed;
+        if (rs) {
+            addDamage(rs.taken, {fire: self}, self);
+            takenHere(self);
+            rs.preventedResist += Math.max(0, pool - self);
+            rs.wardAbsorbed += absorbed;
+            rs.lowestHp = Math.min(rs.lowestHp, Math.max(0, adventurer.hp) / stats.maxHealth);
+        }
+        if (adventurer.hp <= 0 && !rebirth()) {
+            defeat('Titan\'s Furnace');
+            return;
+        }
+        for (const m of [...activity.monsters]) strikeMonster(m, {fire: pool}, undefined, true);
+        clearFallen();
     }
     // A hit landing on the hero, from a monster or reflected: block, then armor and resistances, then
     // ward before life. A hit that isn't blocked may add a Corrosion stack. Returns false if it killed.
@@ -1130,16 +1200,18 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         const armor = stats.armor * sunderFactor(activity.heroAilments);
         // Dodge chance (Ninja's Shuriken): a separate roll on each hit that got past evasion. It doesn't
         // end the attacker's chain, so the next hit still rolls.
-        if (!reflected && from && tg('dodgeChance') > 0 && rng() < tg('dodgeChance')) {
+        if (!reflected && from && dodgeChance > 0 && rng() < dodgeChance) {
             if (rs) rs.attacksDodged++;
             if (riposteL) (activity.recentDodges ??= []).push(activity.clock ?? 0);
+            signatureDodge();
             pushCombat({adventurerId: adventurer.id, side: 'hero', slot, kind: 'miss', hitIndex});
             return true;
         }
         // Trophy reductions: less elemental damage, less damage, and reduced reflected damage.
         const lessEle = 1 - tg('lessElementalDamageTaken');
         const takenByType = mitigateByType(split, armor, stats.resist);
-        for (const e of elementsOf(takenByType)) takenByType[e] = (takenByType[e] ?? 0) * lessEle;
+        // Golem Heart: armor also reduces elemental damage, at part of its effect.
+        for (const e of elementsOf(takenByType)) takenByType[e] = (has('stoneSkin') ? armorReduce(takenByType[e] ?? 0, STONE_SKIN * armor) : takenByType[e] ?? 0) * lessEle;
         const takenMore = shockFactor(activity.heroAilments) * (1 - tg('lessDamageTaken')) * (reflected ? 1 - tg('reducedReflectedDamageTaken') : 1);
         for (const t of Object.keys(takenByType) as DamageType[]) takenByType[t] = (takenByType[t] ?? 0) * takenMore;
         const sumTaken = Object.values(takenByType).reduce((a, b) => a + (b ?? 0), 0);
@@ -1154,7 +1226,15 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             const onBlock = (stats.gear.wardOnBlock ?? 0) + (stats.gear.wardOnBlockPercent ?? 0) * stats.maxWard;
             if (onBlock > 0) gainWard(onBlock);
             if (counterL) activity.counters = (activity.counters ?? 0) + 1;
+            const raw = Object.values(split).reduce((a, b) => a + (b ?? 0), 0);
+            // Overseer's Seal: the blocked blow is stored for the next hit.
+            if (has('madeToLast')) activity.stored = (activity.stored ?? 0) + raw;
             pushCombat({adventurerId: adventurer.id, side: 'hero', slot, kind: 'block', hitIndex, ...refl});
+            // Thornheart: blocked blows come back harder.
+            if (has('livingBramble') && from && !reflected) {
+                const attacker = activity.monsters.find(m => m.slot === slot && m.key === from);
+                if (attacker) strikeMonster(attacker, {physical: BRAMBLE_BLOCK_SHARE * raw});
+            }
             return true;
         }
         if (rs) {
@@ -1184,8 +1264,13 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             adventurer.ward = Math.min(adventurer.ward ?? 0, spellL ? 2 * newMax : newMax);
         }
         if (rampageL && taken > 0) (activity.recentHits ??= []).push({at: activity.clock ?? 0, amount: taken});
-        // Ward soaks damage of any type before HP.
-        const absorbed = Math.min(adventurer.ward ?? 0, taken);
+        // Thornheart: the attacker takes part of the blow back.
+        if (has('livingBramble') && from && !reflected) {
+            const attacker = activity.monsters.find(m => m.slot === slot && m.key === from);
+            if (attacker) strikeMonster(attacker, {physical: BRAMBLE_SHARE * Object.values(split).reduce((a, b) => a + (b ?? 0), 0)});
+        }
+        // Ward soaks damage of any type before HP. The Pale Crown lets part of it through.
+        const absorbed = Math.min(adventurer.ward ?? 0, taken * (has('deathHeldIn') ? 1 - DEATH_HELD_BYPASS : 1));
         adventurer.ward = (adventurer.ward ?? 0) - absorbed;
         taken -= absorbed;
         adventurer.hp -= taken;
@@ -1198,12 +1283,12 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         // Siphon ward: each hit that isn't blocked restores a share of max ward afterward.
         if (siphonL && stats.maxWard > 0 && adventurer.hp > 0) gainWard(SIPHON_RESTORE * sc('siphonWard') * stats.maxWard);
         pushCombat({adventurerId: adventurer.id, side: 'hero', slot, kind: 'hit', amount: taken, ward: absorbed, hitIndex, damageType: mainType(split), hpAfter: Math.max(0, adventurer.hp) / stats.maxHealth, wardAfter: (adventurer.ward ?? 0) / Math.max(1, stats.maxWard), pool: stats.maxHealth + stats.maxWard, ...refl});
-        return adventurer.hp > 0;
+        return adventurer.hp > 0 || rebirth();
     };
     // Burning on monsters. A burn kill counts as a kill.
     let burnedOut = false;
     for (const m of [...activity.monsters]) {
-        const burn = hurt(m, tickAilments(m.ailments, dt) * shockFactor(m.ailments));
+        const burn = hurt(m, tickAilments(m.ailments, dt, has('swarmVenom') ? VENOM_STACKS : 1) * shockFactor(m.ailments));
         if (burn <= 0) continue;
         if (rs) addDamage(rs.dealt, {fire: burn}, Math.min(burn, Math.max(0, m.hp)));
         m.hp -= burn;
@@ -1228,6 +1313,10 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     if (rampageL) {
         activity.recentHits = (activity.recentHits ?? []).filter(h => (activity.clock ?? 0) - h.at <= RAMPAGE_WINDOW);
     }
+    // Tempest Quill: recent dodges raise attack speed. Throneheart: the run's fighting time raises damage and speed.
+    if (activity.tailwind?.length) activity.tailwind = activity.tailwind.filter(at => (activity.clock ?? 0) - at <= TAILWIND_SECONDS);
+    const tailwind = 1 + TAILWIND_SPEED * (activity.tailwind?.length ?? 0);
+    const heroWill = has('risingWill') ? 1 + Math.min(WILL_CAP, WILL_STEP * Math.floor((run?.stats?.fightSeconds ?? activity.clock ?? 0) / WILL_EVERY)) : 1;
     const rampage = () => rampageL ? 1 + RAMPAGE_PER_10 * sc('rampage') * (activity.recentHits ?? []).reduce((sum, h) => sum + h.amount, 0) / 10 : 1;
     // Blood pact: leech heals over its second. While it flows it counts as regeneration.
     if (activity.leechPool?.length) {
@@ -1251,7 +1340,21 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         const swing = stats.strikes?.[(activity.swing ?? 0) % stats.strikes.length];
         const swingDamage = swing?.damage ?? stats.damage;
         if (stats.strikes) activity.swing = ((activity.swing ?? 0) + 1) % stats.strikes.length;
-        if (!free) activity.cooldown += 1 / ((swing?.attacksPerSecond ?? stats.attacksPerSecond) * rampage());
+        if (!free) activity.cooldown += 1 / ((swing?.attacksPerSecond ?? stats.attacksPerSecond) * rampage() * tailwind * heroWill);
+        // Herald's Thunderbolt: every few attacks is a Thunderbolt.
+        const bolt = has('perfectStrike') && (activity.bolts = ((activity.bolts ?? 0) + 1) % BOLT_EVERY) === 0;
+        // Heart of the Rift / Regent's Phylactery: which damage counts for which ailment.
+        const ailmentDamage = (dealt: DamageMap): DamageMap => {
+            if (!has('unsettled') && !has('nightFrost')) return dealt;
+            const out: DamageMap = {...dealt};
+            if (has('unsettled')) {
+                const ele = (dealt.fire ?? 0) + (dealt.cold ?? 0) + (dealt.lightning ?? 0);
+                if (ele > 0) out.fire = out.cold = out.lightning = ele;
+            }
+            if (has('nightFrost')) out.cold = Math.max(out.cold ?? 0, Object.values(dealt).reduce((a, b) => a + (b ?? 0), 0));
+            return out;
+        };
+        let charge = 0;
         // Riposte: crit chance for each attack dodged in the last 2 seconds.
         const critChance = stats.critChance + RIPOSTE_CRIT * sc('riposte') * (riposteL ? activity.recentDodges?.length ?? 0 : 0);
         const critBonus = stats.critBonus;
@@ -1278,12 +1381,15 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         let kills = 0;
         while (hits > 0 && activity.monsters.length) {
             hits--;
+            // Monsters felled by something other than this attack (Living Bramble, Rebirth) leave first.
+            if (activity.monsters.some(m => m.hp <= 0)) clearFallen();
+            if (!activity.monsters.length) break;
             const target = activity.monsters[0];
             const targetStats = getMonsterStats(quest, activity.encounterIndex, target.key, fightKeys(adventurer.run));
             // Each part of a combined hit rolls its own damage and crit.
             let roll = 0, scale = 0, critLevels = 0;
             for (let part = 0; part < combine; part++) {
-                const levels = rollCritLevels(critChance, rng);
+                const levels = rollCritLevels(critChance, rng) + (bolt ? BOLT_CRIT_LEVELS : 0);
                 const partScale = 1 + critBonus * levels;
                 roll += (stats.rollMin + (stats.rollMax - stats.rollMin) * rng()) * partScale;
                 scale += partScale;
@@ -1306,12 +1412,59 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             const a = target.ailments;
             const exploit = exploitL ? 1 + EXPLOIT_PER_AILMENT * sc('exploit') * ((a?.burns?.length ? 1 : 0) + (a?.chill ? 1 : 0) + (a?.shock ? 1 : 0)) : 1;
             // Weaken on the hero cuts the damage of each hit before armor and resistances.
-            const more = mult * exploit * bloodBonus() * rampage() * weakenFactor(activity.heroAilments);
+            // Overseer's Seal: blows blocked since the last hit land with this one.
+            if (activity.stored) {
+                hit.physical = (hit.physical ?? 0) + activity.stored;
+                activity.stored = 0;
+            }
+            // Stormcrown: the first hit on each monster.
+            const first = has('strikesOnce') && !target.struck;
+            target.struck = true;
+            const more = mult * exploit * bloodBonus() * rampage() * weakenFactor(activity.heroAilments) * heroWill * (first ? 1 + STRIKES_ONCE_MORE : 1);
             if (more !== 1) for (const type of Object.keys(hit) as DamageType[]) hit[type] = (hit[type] ?? 0) * more;
-            const dealtByType = mitigateByType(hit, targetStats.armor, penetrate(targetStats.resist, stats.resistPenetration));
+            const targetResist = penetrate(targetStats.resist, stats.resistPenetration);
+            // A Thunderbolt is all lightning.
+            if (bolt) {
+                const total = Object.values(hit).reduce((a, b) => a + (b ?? 0), 0);
+                for (const type of Object.keys(hit) as DamageType[]) delete hit[type];
+                hit.lightning = total;
+            }
+            // Prismatic Eye: elemental damage becomes the element the target resists least.
+            if (has('seesAllStorms')) {
+                const ele = (hit.fire ?? 0) + (hit.cold ?? 0) + (hit.lightning ?? 0);
+                if (ele > 0) {
+                    const weakest = (['fire', 'cold', 'lightning'] as Element[]).reduce((best, e) => (targetResist[e] ?? 0) < (targetResist[best] ?? 0) ? e : best, 'fire' as Element);
+                    delete hit.fire; delete hit.cold; delete hit.lightning;
+                    hit[weakest] = ele;
+                }
+            }
+            // Sanctum Blade: hits ignore armor and Guard.
+            const doors = has('doorsForce');
+            const targetArmor = doors ? 0 : targetStats.armor;
+            const dealtByType = mitigateByType(hit, targetArmor, targetResist);
             // Shock on the target raises all damage it takes.
-            const dealt = hurt(target, mitigateDamage(hit, targetStats.armor, penetrate(targetStats.resist, stats.resistPenetration), rng) * shockFactor(target.ailments));
-            inflict(target.ailments ??= {}, dealtByType, threshold, rng, parts > 1 ? {...ailmentBonus, rolls: parts} : ailmentBonus);
+            const dealt = hurt(target, mitigateDamage(hit, targetArmor, targetResist, rng) * shockFactor(target.ailments), doors);
+            const hitBonus = bolt ? {...ailmentBonus, chance: {...ailmentBonus.chance, shock: 1}} : ailmentBonus;
+            inflict(target.ailments ??= {}, ailmentDamage(dealtByType), threshold, rng, parts > 1 ? {...hitBonus, rolls: parts} : hitBonus);
+            // Ember of the Wyrmqueen: crits burn, based on the whole hit.
+            if (critLevels && has('weakSpot')) {
+                const dps = BURN_SHARE * Object.values(dealtByType).reduce((a, b) => a + (b ?? 0), 0) * Math.max(0, 1 + (ailmentBonus.effect ?? 0));
+                if (dps >= MIN_DOT_DPS) (target.ailments.burns ??= []).push({dps, remaining: ailmentBonus.burnSeconds ?? BURN_SECONDS});
+            }
+            // Deepfire Core: hits keep burns going.
+            if (has('neverCools') && target.ailments.burns) for (const b of target.ailments.burns) b.remaining = Math.max(b.remaining, ailmentBonus.burnSeconds ?? BURN_SECONDS);
+            // Black Pearl: each hit saps the monster's damage.
+            if (has('drinksStrength')) target.drained = Math.min(DRAIN_CAP, (target.drained ?? 0) + DRAIN_STEP);
+            // Stormvein Heart: lightning builds a charge, released every few lightning hits.
+            if (has('capacitor') && (hit.lightning ?? 0) > 0) {
+                activity.charge = (activity.charge ?? 0) + (hit.lightning ?? 0);
+                activity.chargeHits = (activity.chargeHits ?? 0) + 1;
+                if (activity.chargeHits >= CAPACITOR_HITS) {
+                    charge += activity.charge;
+                    activity.charge = 0;
+                    activity.chargeHits = 0;
+                }
+            }
             // Leech counts only damage the monster had left to lose.
             const effective = Math.min(dealt, Math.max(0, target.hp));
             const onHit = healHero(stats.lifeOnHit);
@@ -1345,6 +1498,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
                 if (!reflectLands) {
                     if (rs) rs.attacksDodged++;
                     if (riposteL) (activity.recentDodges ??= []).push(activity.clock ?? 0);
+                    signatureDodge();
                     const onDodge = (stats.gear.wardOnDodge ?? 0) + (stats.gear.wardOnDodgePercent ?? 0) * stats.maxWard;
                     if (onDodge > 0) gainWard(onDodge);
                     pushCombat({adventurerId: adventurer.id, side: 'hero', slot: target.slot ?? 0, kind: 'miss', reflected: true});
@@ -1371,8 +1525,9 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
                 for (const other of [...activity.monsters]) {
                     if (other === target || other.hp <= 0) continue;
                     const otherStats = getMonsterStats(quest, activity.encounterIndex, other.key, fightKeys(adventurer.run));
-                    const otherDealt = hurt(other, mitigateDamage(part, otherStats.armor, penetrate(otherStats.resist, stats.resistPenetration), rng) * shockFactor(other.ailments));
-                    if (rs) addDamage(rs.dealt, mitigateByType(part, otherStats.armor, penetrate(otherStats.resist, stats.resistPenetration)), Math.min(otherDealt, other.hp));
+                    const otherArmor = doors ? 0 : otherStats.armor;
+                    const otherDealt = hurt(other, mitigateDamage(part, otherArmor, penetrate(otherStats.resist, stats.resistPenetration), rng) * shockFactor(other.ailments), doors);
+                    if (rs) addDamage(rs.dealt, mitigateByType(part, otherArmor, penetrate(otherStats.resist, stats.resistPenetration)), Math.min(otherDealt, other.hp));
                     other.hp -= otherDealt;
                     shatterCheck(other);
                     pushCombat({adventurerId: adventurer.id, side: 'monster', slot: other.slot ?? 0, kind: 'hit', amount: otherDealt, critLevels, hitIndex: 0, damageType: mainType(part), killed: other.hp <= 0, hpAfter: Math.max(0, other.hp) / other.maxHp});
@@ -1391,6 +1546,13 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
                 }
             }
         }
+        // Capacitor's discharge hits every monster, with double the usual chance to shock.
+        if (charge > 0) {
+            const shock = CAPACITOR_SHOCK_MULT * (AILMENT_CHANCE + (ailmentBonus.chance?.shock ?? 0)) - AILMENT_CHANCE;
+            const bonus = {...ailmentBonus, chance: {shock}};
+            for (const m of [...activity.monsters]) strikeMonster(m, {lightning: charge}, bonus);
+            clearFallen();
+        }
         const rec = records(adventurer);
         rec.bestChain = Math.max(rec.bestChain, landed);
         rec.bestKills = Math.max(rec.bestKills, kills);
@@ -1398,6 +1560,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     };
     // Chill slows the hero's attacks.
     activity.cooldown -= dt * slowFactor(activity.heroAilments);
+    clearFallen();
     while (activity.cooldown <= 0 && activity.monsters.length) {
         if (!attack(1, false)) return;
     }
@@ -1407,6 +1570,13 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         if (!attack(COUNTER_DAMAGE * sc('counterstrike'), true)) return;
     }
     activity.counters = 0;
+    // Hiveheart: dodges since the last tick each earn a free attack.
+    while (activity.hiveCounters && activity.monsters.length) {
+        activity.hiveCounters--;
+        if (!attack(HIVE_DAMAGE, true)) return;
+    }
+    activity.hiveCounters = 0;
+    clearFallen();
     if (!activity.monsters.length) {
         winEncounter(state, adventurer, quest, activity.encounterIndex, rng, activity.bonus, (activity.lineup?.length ?? quest.encounters[activity.encounterIndex].monsters.length) + 0.5 * (activity.summonedCount ?? 0), activity.boss);
         activity.ending = ENCOUNTER_END_SECONDS;
@@ -1414,6 +1584,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
     }
     // Every monster still standing attacks on its own cooldown.
     for (const front of activity.monsters) {
+        if (front.hp <= 0) continue;
         const frontStats = getMonsterStats(quest, activity.encounterIndex, front.key, fightKeys(adventurer.run));
         front.age = (front.age ?? 0) + dt;
         const will = willFactor(front);
@@ -1428,7 +1599,7 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
         }
         // Chill slows the monster's attacks; Rally speeds them up.
         front.cooldown -= dt * slowFactor(front.ailments) * (1 + (front.haste?.amount ?? 0));
-        while (front.cooldown <= 0) {
+        while (front.cooldown <= 0 && front.hp > 0) {
             front.cooldown += 1 / (frontStats.attacksPerSecond * will);
             if (front.haste && --front.haste.turns <= 0) delete front.haste;
             if (front.guard && --front.guard.turns <= 0) delete front.guard;
@@ -1454,7 +1625,10 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
                 continue;
             }
             // Monsters chain hits the same way heroes do. Each hit can be blocked on its own.
-            const hits = rollHits(frontStats.accuracy * (entry?.accuracy ?? 1), exposedEvasion(stats.evasion * galeFactor(activity.heroAilments), activity.heroExposed), rng);
+            let hits = rollHits(frontStats.accuracy * (entry?.accuracy ?? 1), exposedEvasion(stats.evasion * galeFactor(activity.heroAilments), activity.heroExposed), rng);
+            // Oracle's Eye: each monster's first attack misses.
+            if (has('foresight') && !front.foreseen) hits = 0;
+            front.foreseen = true;
             activity.heroExposed = hits ? 0 : (activity.heroExposed ?? 0) + 1;
             if (rs) {
                 rs.incomingAttacks++;
@@ -1462,12 +1636,14 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
             }
             if (!hits) {
                 if (riposteL) (activity.recentDodges ??= []).push(activity.clock ?? 0);
+                signatureDodge();
                 const onDodge = (stats.gear.wardOnDodge ?? 0) + (stats.gear.wardOnDodgePercent ?? 0) * stats.maxWard;
                 if (onDodge > 0) gainWard(onDodge);
                 pushCombat({adventurerId: adventurer.id, side: 'hero', slot: front.slot ?? 0, kind: 'miss'});
                 continue;
             }
-            const roll = () => frontStats.damage * will * (0.85 + 0.3 * rng()) * Math.max(0.2, 1 - hexFactor(front));
+            // Black Pearl: drained monsters hit softer.
+            const roll = () => frontStats.damage * will * (0.85 + 0.3 * rng()) * Math.max(0.2, 1 - hexFactor(front)) * (1 - (front.drained ?? 0));
             if (!entry) {
                 for (let hitIndex = 0; hitIndex < hits; hitIndex++) {
                     if (!landHit(splitDamage(roll(), frontStats.damageTypes), front.slot ?? 0, hitIndex, front.key)) break;
@@ -1534,12 +1710,14 @@ function tickFight(state: GameState, adventurer: Adventurer, dt: number, rng: Rn
                 }
                 if (e.heal) front.hp = Math.min(front.maxHp, front.hp + e.heal * front.maxHp);
             }
-            if (adventurer.hp <= 0) {
+            if (adventurer.hp <= 0 && !rebirth()) {
                 defeat(frontStats.name);
                 return;
             }
         }
     }
+    // Monsters felled on their own turn (Living Bramble, Rebirth) leave the fight.
+    clearFallen();
 }
 
 // The leech soft cap (see tickFight): a band is this share of max HP + max ward, per this many seconds.

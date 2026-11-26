@@ -1321,7 +1321,10 @@ function placeBattle() {
     const fit = `${k}:${baseW}:${left}:${top}`;
     if (fit === battleFit) return;
     battleFit = fit;
-    Object.assign(combatView.el.style, {left: `${left}px`, top: `${top}px`, width: `${baseW}px`, transform: `scale(${k})`});
+    // zoom, not transform: scale. Safari draws a scaled element's text at its unscaled size whenever an
+    // animation inside puts it on its own GPU layer, so the bar numbers blurred while monsters moved.
+    // Zoom lays the arena out at full size; its own left and top are zoomed too, so they divide by k.
+    Object.assign(combatView.el.style, {left: `${left / k}px`, top: `${top / k}px`, width: `${baseW}px`, zoom: String(k)});
     battleEl.style.setProperty('--k', String(k));
 }
 
@@ -1461,7 +1464,7 @@ function renderPanelsInner() {
         world.classList.remove('battle');
         combatView.el.remove();
         combatView.el.classList.remove('big');
-        combatView.el.style.transform = '';
+        combatView.el.style.zoom = '';
     }
     const roomy = world.clientWidth >= RUN_PANEL_MIN + 32;
     const runParent = roomy ? world : map;

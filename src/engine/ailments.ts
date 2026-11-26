@@ -66,17 +66,20 @@ export function inflict(target: Ailments, dealt: DamageMap, threshold: number, r
     return landed;
 }
 
-export function burnDps(a: Ailments | undefined): number {
-    return a?.burns?.reduce((best, b) => Math.max(best, b.dps), 0) ?? 0;
+// Burn damage a second: the strongest burn, or with Swarm Venom the `stacks` strongest added up.
+export function burnDps(a: Ailments | undefined, stacks = 1): number {
+    if (!a?.burns?.length) return 0;
+    if (stacks <= 1) return a.burns.reduce((best, b) => Math.max(best, b.dps), 0);
+    return a.burns.map(b => b.dps).sort((x, y) => y - x).slice(0, stacks).reduce((sum, d) => sum + d, 0);
 }
 
 // Advances the ailments by dt. Returns the burn damage dealt in that time, before Shock.
-export function tickAilments(a: Ailments | undefined, dt: number): number {
+export function tickAilments(a: Ailments | undefined, dt: number, stacks = 1): number {
     if (!a) return 0;
     let damage = 0;
     if (a.burns?.length) {
         // The strongest burn ticks; every burn's timer runs.
-        damage = burnDps(a) * dt;
+        damage = burnDps(a, stacks) * dt;
         for (const b of a.burns) b.remaining -= dt;
         a.burns = a.burns.filter(b => b.remaining > 0);
         if (!a.burns.length) delete a.burns;

@@ -1,8 +1,9 @@
 import {itemTypes, slotOrder} from '../data/items';
 import {requireMaterial} from '../data/materials';
 import {classPassive, classes, damageStats} from '../data/quests';
-import {bonusMultiplier, DEADEYE_CRIT_MULTI, DUAL_MORE, ELEMENTAL_MORE, ELEMENTAL_PENETRATION, FOLLOW_ACCURACY, FURY_PER_MAX, MARTIAL_CRIT, MARTIAL_CRIT_MULTI, MARTIAL_SPEED_PER_LEVEL, passiveLevel, passiveScale, SIPHON_WARD, type PassiveKey} from '../data/passives';
+import {bonusMultiplier, DEADEYE_CRIT_MULTI, ENHANCED_EFFECT, DUAL_MORE, ELEMENTAL_MORE, ELEMENTAL_PENETRATION, FOLLOW_ACCURACY, FURY_PER_MAX, MARTIAL_CRIT, MARTIAL_CRIT_MULTI, MARTIAL_SPEED_PER_LEVEL, passiveLevel, passiveScale, SIPHON_WARD, type PassiveKey} from '../data/passives';
 import {equippedBonuses} from '../data/trophies';
+import {BOLT_SLOW, BRIAR_LEVELS, DEATH_HELD_LIFE, TALON_SPEED, type SignatureKey} from '../data/signatures';
 import {getCraftedItemStats, getMaterialEquipStats} from './crafting';
 import {addStats, elements, resistStat} from '../data/stats';
 import type {Adventurer, DamageMap, DamageType, Element, GameState, ItemRef, ItemStats, ItemTypeKey, StatKey, StatValues} from './types';
@@ -11,6 +12,8 @@ export interface ResolvedItem {
     name: string
     itemType: ItemTypeKey
     stats: ItemStats
+    // A material worn directly: its key.
+    materialKey?: string
 }
 
 export function resolveItemRef(state: GameState, ref: ItemRef): ResolvedItem | undefined {
@@ -26,7 +29,7 @@ export function resolveItemRef(state: GameState, ref: ItemRef): ResolvedItem | u
     if (!stats || !material.equip) {
         return undefined;
     }
-    return {name: material.equip.name, itemType: material.equip.itemType, stats};
+    return {name: material.equip.name, itemType: material.equip.itemType, stats, materialKey: material.key};
 }
 
 export interface Strike {
@@ -74,6 +77,26 @@ export interface AdventurerStats {
     wieldNote: string
     // Summed stats from all equipped items, for display.
     gear: StatValues
+    // Signature effects of worn legendaries and mythics (data/signatures.ts): how many are worn.
+    signatures: Partial<Record<SignatureKey, number>>
+    // Level plus Briarcrown's effective levels: what stats and gear requirements use.
+    effectiveLevel: number
+}
+
+// The signature effects an adventurer's worn materials carry, counted.
+export function wornSignatures(adventurer: Adventurer): Partial<Record<SignatureKey, number>> {
+    const out: Partial<Record<SignatureKey, number>> = {};
+    for (const ref of Object.values(adventurer.equipment)) {
+        if (ref?.kind !== 'material') continue;
+        const key = requireMaterial(ref.key).equip?.signature;
+        if (key) out[key] = (out[key] ?? 0) + 1;
+    }
+    return out;
+}
+// Level for stats and gear requirements: Briarcrown adds levels that don't count for ambitions,
+// trophies or achievements (those read adventurer.level).
+export function effectiveLevel(adventurer: Adventurer): number {
+    return adventurer.level + (wornSignatures(adventurer).briarcrown ? BRIAR_LEVELS : 0);
 }
 
 export const RESIST_CAP = 0.75;
@@ -106,10 +129,12 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
     }
     const g = (key: StatKey) => gear[key] ?? 0;
     const cls = classes[adventurer.classKey];
-    const level = adventurer.level;
+    const sig = wornSignatures(adventurer);
+    const level = effectiveLevel(adventurer);
     const pl = (key: Parameters<typeof passiveLevel>[1]) => passiveLevel(adventurer, key, classPassive);
     // How strong each core passive's scaling numbers are: 1, plus enhanced and guild increases.
-    const ps = (key: PassiveKey) => passiveScale(adventurer, key, classPassive, g('corePassiveEffect'));
+    // The Borrowed Crown enhances every passive the hero has, on top of any enhancement already rolled.
+    const ps = (key: PassiveKey) => passiveScale(adventurer, key, classPassive, g('corePassiveEffect') + (sig.pretendersClaim ? ENHANCED_EFFECT : 0));
     // Each class grows its own number of points per attribute per level. Rare bonuses multiply totals.
     const b = (key: Parameters<typeof bonusMultiplier>[1]) => bonusMultiplier(adventurer, key);
     const str = Math.floor((cls.growth.str * level + g('str')) * b('str') * (1 + g('increasedStr')));
@@ -133,7 +158,9 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
     // wielding. A hidden combination: nothing seen before hiring a Vagabond mentions it (see data/passives.ts).
     const fists = !!martial && !!pl('dualMastery');
 
-    const maxHealth = Math.floor((20 + 4 * level + 2 * str + g('maxHealth')) * (1 + g('increasedMaxHealth')) * b('maxHealth'));
+    const maxWard = Math.floor((int + g('ward')) * b('ward') * (1 + g('increasedWard')) * (1 + SIPHON_WARD * ps('siphonWard')));
+    // The Pale Crown: max ward also counts as max HP.
+    const maxHealth = Math.floor((20 + 4 * level + 2 * str + g('maxHealth')) * (1 + g('increasedMaxHealth')) * b('maxHealth')) + (sig.deathHeldIn ? Math.floor(DEATH_HELD_LIFE * maxWard) : 0);
     const physicalMore = 1 + g('increasedDamage') + g('increasedPhysicalDamage');
     const elementalMore = (1 + g('increasedDamage') + g('increasedElementalDamage')) * (1 + ELEMENTAL_MORE * ps('elementalMastery'));
     // Conversion moves physical damage to elements before scaling. Over 100% in total is scaled down.
@@ -152,8 +179,10 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
     const flatKeys: Record<DamageType, StatKey> = {physical: 'physicalDamage', fire: 'fireDamage', cold: 'coldDamage', lightning: 'lightningDamage'};
     // Defenses turned into damage: a share of max HP as fire, of evasion as cold, of max ward as
     // lightning, added to every hit like flat damage from gear.
-    const evasion = Math.floor((g('evasion') + dex) * (1 + g('increasedEvasion')) * b('evasion'));
-    const maxWard = Math.floor((int + g('ward')) * b('ward') * (1 + g('increasedWard')) * (1 + SIPHON_WARD * ps('siphonWard')));
+    // Increased attack speed: gear, Martial arts' per-level speed and Talon of the Tempest (per Talon).
+    const speedIncreased = g('attackSpeed') + MARTIAL_SPEED_PER_LEVEL * martialScale * level + TALON_SPEED * weapons.filter(w => w.materialKey && requireMaterial(w.materialKey).equip?.signature === 'tempestTalon').length;
+    // Wolfking Pelt: increased attack speed also raises evasion.
+    const evasion = Math.floor((g('evasion') + dex) * (1 + g('increasedEvasion') + (sig.packLeader ? Math.max(0, speedIncreased) : 0)) * b('evasion'));
     const fromDefense: Record<DamageType, number> = {physical: 0, fire: g('healthAsFire') * maxHealth, cold: g('evasionAsCold') * evasion, lightning: g('wardAsLightning') * maxWard};
     const gf = (t: DamageType) => g(flatKeys[t]) + fromDefense[t];
     // Unarmed hits for 1. Half the core stat is added as flat physical damage (all of it with Martial arts).
@@ -162,7 +191,8 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
     const coreFlat = (unarmed ? 1 : 0) + coreValue * (martial ? 1 : 0.5) + furyFlat;
     let damage: Flat;
     // Martial arts: +1% increased attack speed per level, added to gear's increased attack speed.
-    const speedMore = (1 + g('attackSpeed') + MARTIAL_SPEED_PER_LEVEL * martialScale * level) * b('attackSpeed');
+    // Herald's Thunderbolt: less attack speed.
+    const speedMore = (1 + speedIncreased) * b('attackSpeed') * (sig.perfectStrike ? 1 - BOLT_SLOW : 1);
     let strikes: Strike[] | undefined;
     if (dual) {
         // Swings alternate main hand and off hand. Each hits with its own weapon's flat damage plus
@@ -233,6 +263,8 @@ export function getAdventurerStats(state: GameState, adventurer: Adventurer): Ad
         weaponName: weapons.map(w => w.name).join(' & ') || 'Unarmed',
         wieldNote: fists ? `unarmed, Martial arts, fists dual wield, ${Math.round(100 * (1 + DUAL_MORE * ps('dualMastery')))}% damage, +15% block` : dual ? `dual wielding, alternating swings${pl('dualMastery') ? `, ${Math.round(100 * (1 + DUAL_MORE * ps('dualMastery')))}% damage` : ''}, +15% block` : martial ? 'unarmed, Martial arts, +15% block' : unarmed && pl('martialArts') ? 'unarmed, but the off hand item turns off Martial arts' : unarmed ? 'unarmed' : parry ? 'staff, +15% block' : '',
         gear,
+        signatures: sig,
+        effectiveLevel: level,
     };
 }
 

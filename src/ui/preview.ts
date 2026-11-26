@@ -175,7 +175,7 @@ export function openPreview(parent: HTMLElement) {
         const baseW = big ? Math.min(600, Math.floor((w - 24) / k)) : Math.min(360, w - 24);
         view.el.classList.toggle('big', big);
         stage.classList.toggle('big', big);
-        Object.assign(view.el.style, {left: `${Math.round((w - baseW * k) / 2)}px`, top: `${Math.max(0, Math.round((hgt - ARENA_H * k) / 2))}px`, width: `${baseW}px`, transform: `scale(${k})`});
+        Object.assign(view.el.style, {left: `${Math.round((w - baseW * k) / 2) / k}px`, top: `${Math.max(0, Math.round((hgt - ARENA_H * k) / 2)) / k}px`, width: `${baseW}px`, zoom: String(k)});
         stage.style.setProperty('--k', String(k));
     };
 

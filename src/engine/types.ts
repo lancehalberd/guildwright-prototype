@@ -1,3 +1,4 @@
+import type {SignatureKey} from '../data/signatures';
 import type {BasicRef} from '../data/basics';
 import type {BonusKey, PassiveKey} from '../data/passives';
 // Core data types. Everything in GameState is plain JSON so it can be saved to local storage.
@@ -153,7 +154,7 @@ export interface MaterialDef {
     // A key for the final area: no crafting use, no premium version.
     keyItem?: boolean
     // Materials that can be worn directly as a specific item type.
-    equip?: {itemType: ItemTypeKey, name: string, stats: StatValues}
+    equip?: {itemType: ItemTypeKey, name: string, stats: StatValues, signature?: SignatureKey}
     // A premium variant (see data/materials.ts).
     premium?: boolean
 }
@@ -393,6 +394,11 @@ export interface MonsterState {
     guard?: {amount: number, turns: number}
     evade?: {amount: number, turns: number}
     ward?: number
+    // Signature effects (data/signatures.ts): hit once by the hero (Stormcrown), damage sapped
+    // (Black Pearl), first attack already made (Oracle's Eye).
+    struck?: boolean
+    drained?: number
+    foreseen?: boolean
 }
 
 export type Activity =
@@ -430,7 +436,16 @@ export type Activity =
         // Rampage: damage the hero took recently, with when.
         recentHits?: {at: number, amount: number}[],
         // Blood pact: leech still to be recovered, each part over its remaining seconds.
-        leechPool?: {perSecond: number, left: number}[]}
+        leechPool?: {perSecond: number, left: number}[],
+        // Signature effects (data/signatures.ts): Tempest Quill's recent dodges, Hiveheart's free
+        // attacks to make, Overseer's Seal's stored damage, Herald's Thunderbolt's attack count,
+        // Stormvein Heart's charge and the lightning hits building it.
+        tailwind?: number[],
+        hiveCounters?: number,
+        stored?: number,
+        bolts?: number,
+        charge?: number,
+        chargeHits?: number}
     | {kind: 'resting', questKey: string, remaining: number, defeated: boolean};
 
 export interface Adventurer {
@@ -570,6 +585,8 @@ export interface RunRecord {
     riteBoss?: 'pending' | 'fought'
     // Area rule stacks, kept for the whole run.
     corrosion?: number
+    // Phoenix Feather's Rebirth was used this run.
+    reborn?: boolean
     karma?: number
     // A full clear waiting on this run's extra fights (rite, ambition boss, bonus rare): it counts
     // for trophies, contracts and records only once those are won too.
