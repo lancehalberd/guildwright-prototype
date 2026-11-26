@@ -24,7 +24,7 @@ import {bestDelta, deltaColumn, deltaLine, deltaLines} from './compareView';
 import {autoEquip} from '../engine/autoEquip';
 import {comparisonSlots} from '../engine/compare';
 import {BENCH_PRICE, buyBench, buyShopItem, hasBench, refreshShop, restockSold, shopRefreshCost, shopStock, type ShopItem} from '../engine/shop';
-import {APPLICANT_SLOTS, THIRD_APPLICANT_EXPANSION, applicantSlotFame, applicantSlots, ambitionHint, ambitionProgress, ambitionText, ambitionTierNames, applicantTierOdds, ensureApplicants, guildTier, TIER_FAME, tierStartFame, refreshApplicants, refreshCost, RETIRE_MULTIPLIER, retireFame} from '../engine/ambitions';
+import {APPLICANT_SLOTS, FOURTH_APPLICANT_EXPANSION, THIRD_APPLICANT_EXPANSION, applicantSlotFame, applicantSlots, ambitionHint, ambitionProgress, ambitionText, ambitionTierNames, applicantTierOdds, ensureApplicants, guildTier, TIER_FAME, tierStartFame, refreshApplicants, refreshCost, RETIRE_MULTIPLIER, retireFame} from '../engine/ambitions';
 import {contractHolder, contractRewardText, contractText, dropContract, ensureGuildContracts, ensurePersonalContract, findContract, grantedModifiers, guildRefreshCost, personalRefreshCost, refreshGuildContract, refreshPersonalContract, takeContract} from '../engine/contracts';
 import type {Ambition, Applicant, Contract, HeroPassive} from '../engine/types';
 import {bloodPactBonus, bonusText as rareBonusText, cursePremium, curseText, passiveScale, passives as passiveDefs, type BonusKey, type PassiveKey} from '../data/passives';
@@ -2614,7 +2614,9 @@ function hirePanel(ctx: Ctx): HTMLElement {
             + (guildTier(state) < TIER_FAME.length ? `. ${ambitionTierNames[guildTier(state) + 1]} applicants start at ${Math.round(0.8 * TIER_FAME[guildTier(state)])} fame.` : '.')),
         h('div', null,
             h('h3', null, `Applicants (${applicantSlots(state)})`),
-            (state.expansion ?? 0) < THIRD_APPLICANT_EXPANSION ? h('div', {class: 'muted small', style: 'margin-bottom:4px'}, `Hired applicants are replaced right away. Guild Expansion ${THIRD_APPLICANT_EXPANSION} adds a third applicant (+${applicantSlotFame(2, 3)} fame).`) : null,
+            (state.expansion ?? 0) < FOURTH_APPLICANT_EXPANSION ? h('div', {class: 'muted small', style: 'margin-bottom:4px'}, (state.expansion ?? 0) < THIRD_APPLICANT_EXPANSION
+                ? `Hired applicants are replaced right away. Guild Expansion ${THIRD_APPLICANT_EXPANSION} adds a third applicant (+${applicantSlotFame(2, 3)} fame).`
+                : `Hired applicants are replaced right away. Guild Expansion ${FOURTH_APPLICANT_EXPANSION} adds a fourth applicant (+${applicantSlotFame(3, 4)} fame).`) : null,
             h('div', {class: 'list'}, ...(state.applicants ?? []).map(app => {
                 const blocked = canHire(state, app.fee);
                 return applicantCard(app, full ? h('span', {class: 'hirelocked small', title: 'No free member slots'}, `${app.fee} gold · no free slot`) : h('button', {
@@ -2851,7 +2853,8 @@ function trophySection(ctx: Ctx): HTMLElement {
         h('div', {class: 'trophy-slots'}, ...slotEls),
         banners.length ? h('div', {class: 'trophy-banners', role: 'list', 'aria-label': 'Endless banners'}, ...banners.map(def => {
             const tier = state.trophies![def.key];
-            const text = `${trophyTierLabel(def, tier)}: ${def.bonusText(def.tiers[tier].bonus)}. Opens the Endless trial for ${quests[def.key.replace(/^endless-/, '')].name}. Earned: ${earnedText(def, tier)}`;
+            // One line for the title, then one per benefit, then how it was earned.
+            const text = `${trophyTierLabel(def, tier)}\n${def.bonusText(def.tiers[tier].bonus)}\nOpens the Endless trial for ${quests[def.key.replace(/^endless-/, '')].name}\nEarned: ${earnedText(def, tier)}`;
             return h('div', {class: 'tbanner-wrap', role: 'listitem', tabindex: '0', title: text, 'aria-label': text},
                 trophyBanner(def, tier),
                 h('div', {class: 'small ttier tier' + tier}, `+${Math.round((def.tiers[tier].bonus.extraRewardChance ?? 0) * 100)}%`));
@@ -2967,7 +2970,7 @@ function expansionSection(ctx: Ctx): HTMLElement | null {
     const short: Record<SlotTrack, string> = {baseSlot: 'base', decorationSlot: 'decoration', accessorySlot: 'accessory base', accessoryDecorationSlot: 'accessory decoration', memberSlot: 'member', trophySlot: 'trophy'};
     const opens = slotUnlocks.filter(u => u.expansion === e.level).map(u => `${short[u.track]} slot ${u.slot}`);
     if (e.level === 1) opens.push('contracts');
-    if (e.level === THIRD_APPLICANT_EXPANSION) opens.push(`a third applicant (+${applicantSlotFame(APPLICANT_SLOTS[e.level - 1], APPLICANT_SLOTS[e.level])} fame)`);
+    if (e.level === THIRD_APPLICANT_EXPANSION || e.level === FOURTH_APPLICANT_EXPANSION) opens.push(`a ${e.level === THIRD_APPLICANT_EXPANSION ? 'third' : 'fourth'} applicant (+${applicantSlotFame(APPLICANT_SLOTS[e.level - 1], APPLICANT_SLOTS[e.level])} fame)`);
     if (e.level === SALVAGE_EXPANSION) opens.push('the salvage yard');
     else if (e.level > SALVAGE_EXPANSION && e.level - SALVAGE_EXPANSION + 1 <= SALVAGE_MAX) opens.push(`salvage upgrade ${e.level - SALVAGE_EXPANSION + 1}`);
     const ready = state.fame >= e.fame;

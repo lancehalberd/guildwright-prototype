@@ -7,7 +7,7 @@ import groundUrl from '../assets/map/base.webp?inline';
 function byName(files: Record<string, string>): Record<string, string> {
     const out: Record<string, string> = {};
     for (const [path, url] of Object.entries(files)) {
-        const m = /\/(\w+)\.webp$/.exec(path);
+        const m = /\/([\w-]+)\.webp$/.exec(path);
         if (m) out[m[1]] = url;
     }
     return out;

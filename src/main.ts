@@ -30,6 +30,8 @@ const glyphs = {
     bench: '<svg viewBox="0 0 32 32"><path d="M4 11h17c0 4 3 5 7 5v3H19l-2 3h3v4H8v-4h3l-2-3H4z"/></svg>',
     quest: '<svg viewBox="0 0 32 32"><path d="M8 29V4"/><path d="M8 5h16l-4 5 4 5H8"/></svg>',
     salvage: '<svg viewBox="0 0 32 32"><path d="M5 27 17 15"/><path d="M14 10l7-6 7 7-6 7z"/><path d="M6 8h6M9 5v6"/></svg>',
+    // The merchant's HUD button: a $ (the shopfront read too much like the guild hall's).
+    shop: '<svg viewBox="0 0 32 32"><path d="M21.5 10c-1-1.8-3-2.8-5.5-2.8-3.2 0-5.4 1.6-5.4 4.1 0 2.6 2.6 3.4 5.4 4.1s5.4 1.6 5.4 4.3c0 2.6-2.3 4.3-5.4 4.3-2.6 0-4.8-1.1-5.9-3"/><path d="M16 4v24"/></svg>',
     merchant: '<svg viewBox="0 0 32 32"><path d="M5 13h22l-2-6H7z"/><path d="M7 13v13h18V13"/><path d="M13 26v-7h6v7"/><path d="M5 13c0 2 2 3 4 3s4-1 4-3c0 2 2 3 3 3s3-1 3-3c0 2 2 3 4 3s4-1 4-3"/></svg>',
     peddler: '<svg viewBox="0 0 32 32"><path d="M4 22h18l3-9H8"/><path d="M8 13 6 7H3"/><circle cx="9" cy="26" r="2"/><circle cx="20" cy="26" r="2"/><path d="M12 13l3-5 3 5"/></svg>',
     map: '<svg viewBox="0 0 32 32"><path d="M4 8l7-3 10 3 7-3v19l-7 3-10-3-7 3z"/><path d="M11 5v19M21 8v19"/></svg>',
@@ -196,7 +198,7 @@ function hudActions(): HTMLElement {
         // Each place button toggles: a second press closes what it opened.
         hudAction('quest', 'Quest (Q)', glyphs.quest, '#4f6a8c', () => { toggleHudQuest(); }),
         hudAction('guild', 'Guild hall (G)', glyphs.guild, siteColors.guild, () => togglePanel('guild')),
-        hudAction('merchant', 'Merchant (S)', glyphs.merchant, siteColors.merchant, () => { if (ui.shopOpen) closeLeft(); else openShop(); }),
+        hudAction('merchant', 'Merchant (S)', glyphs.shop, siteColors.merchant, () => { if (ui.shopOpen) closeLeft(); else openShop(); }),
         hudAction('bench', 'Crafting bench (W)', glyphs.bench, siteColors.bench, () => { if (ui.benchOpen || !hasBench(state) && ui.shopOpen) closeLeft(); else openBench(); }),
         hudAction('peddler', 'Travelling peddler (P)', glyphs.peddler, siteColors.peddler, () => togglePanel('peddler')),
         hudAction('salvage', 'Salvage yard (Y)', glyphs.salvage, siteColors.salvage, () => togglePanel('salvage')),

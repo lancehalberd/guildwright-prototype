@@ -18,9 +18,11 @@ export const RETIRE_MULTIPLIER = [0, 1, 1.5, 2.5];
 // Hire fee and the most an applicant's starting level can be, by tier.
 export const HIRE_FEES = [50, 200, 1000, 5000, 15000, 30000, 60000, 120000];
 const START_LEVEL_CAP = [1, 5, 10, 15, 20, 25, 30, 35];
-// Applicants on offer: two to start, a third with the second guild expansion.
-export const APPLICANT_SLOTS = [2, 2, 3, 3];
+// Applicants on offer, by guild expansion: two to start, a third with the second expansion and a
+// fourth with the fifth.
+export const APPLICANT_SLOTS = [2, 2, 3, 3, 3, 4];
 export const THIRD_APPLICANT_EXPANSION = 2;
+export const FOURTH_APPLICANT_EXPANSION = 5;
 export function applicantSlots(state: GameState): number {
     return APPLICANT_SLOTS[Math.min(state.expansion ?? 0, APPLICANT_SLOTS.length - 1)];
 }
