@@ -16,8 +16,9 @@ import {exportBuild} from './engine/buildExport';
 import {classIcon, materialIcon} from './ui/icons';
 import {renderMaterialDetail} from './ui/materialDetail';
 import {trophies, trophyList, trophyTierName} from './data/trophies';
+import {questStory} from './data/story';
 import {salvageLevel, salvageVisible} from './engine/salvage';
-import {BENCH_PRICE, hasBench, setHoldLevelRestock} from './engine/shop';
+import {BENCH_PRICE, hasBench, setHoldLevelRestock, shopStock} from './engine/shop';
 import {portalSecondsLeft} from './engine/portal';
 import {peddlerHere, peddlerUnlocked, updatePeddler} from './engine/peddler';
 import {installTextures} from './ui/textures';
@@ -566,6 +567,15 @@ const isNarrow = () => window.innerWidth < 900;
 function openShop() {
     ui.benchOpen = false;
     ui.shopOpen = true;
+    // The buy lesson: a guild that spent its first run's gold (say on an instant recovery) is topped
+    // up to the dearest item on offer, so the lesson can always be finished.
+    if (guideChain === 'gear' && !state.guide?.bought) {
+        const hero = state.adventurers.find(a => a.id === ui.hero) ?? state.adventurers[0];
+        const dearest = hero ? Math.max(0, ...shopStock(state, hero).map(i => i && !i.sold ? i.price : 0)) : 0;
+        if (state.gold < dearest) {
+            state.gold = dearest;
+        }
+    }
     ui.picker = null;
     if (isNarrow()) ui.panel = null;
     else showCharacterPanel();
@@ -686,7 +696,7 @@ function guildGlyph(): HTMLElement {
     builtExpansion = state.expansion ?? 0;
     const url = siteArtUrl(`guild-${level}`) ?? siteArtUrl('guild');
     const [w, hgt] = guildHallSizes[level];
-    return url ? h('div', {class: 'glyph art guildart'}, h('img', {src: url, alt: '', draggable: 'false', style: `width:${Math.round(w * GUILD_ART_SCALE)}px;height:${Math.round(hgt * GUILD_ART_SCALE)}px`})) : siteGlyph('guild', glyphs.guild);
+    return url ? h('div', {class: 'glyph art guildart', style: `--gw:${Math.round(w * GUILD_ART_SCALE)}px;--gh:${Math.round(hgt * GUILD_ART_SCALE)}px`}, h('img', {src: url, alt: '', draggable: 'false', style: `width:${Math.round(w * GUILD_ART_SCALE)}px;height:${Math.round(hgt * GUILD_ART_SCALE)}px`})) : siteGlyph('guild', glyphs.guild);
 }
 
 function withFlag(glyph: HTMLElement, hero: Adventurer | undefined): HTMLElement {
@@ -1569,6 +1579,8 @@ function guideTargetOpen(t: GuideTarget | null): boolean {
         case 'guild': return ui.panel?.kind === 'guild';
         case 'quest': return ui.panel?.kind === 'quest' && ui.panel.key === t.key;
         case 'hero': return ui.panel?.kind === 'adventurer';
+        // The encounter strip's target is on screen (battle view strip or the run panel).
+        case 'recall': return !!visibleEls('[data-guide="recall"]').length || ui.panel?.kind === 'adventurer';
     }
 }
 // The data-guide value panels put on the controls each step is finished with.
@@ -1577,7 +1589,9 @@ function guideFocusKey(t: GuideTarget | null): string | null {
     if (t.kind === 'quest') return t.focus ?? 'send';
     if (t.kind === 'merchant') return state.guide?.bought ? 'bench' : 'buy';
     if (t.kind === 'hero') return 'equip';
-    if (t.kind === 'bench') return 'craft';
+    if (t.kind === 'bench') return craftFocusKey();
+    // The strip when it's on screen, else the character panel's Show run.
+    if (t.kind === 'recall') return visibleEls('[data-guide="recall"]').length ? 'recall' : 'showrun';
     return t.focus ?? null;
 }
 // A trophy is waiting for its first slot: the guild site and the trophy slots pulse alongside any other step.
@@ -1607,12 +1621,19 @@ function guideKeys(): Set<string> {
 }
 function markGuide(root: Element) {
     const keys = guideKeys();
-    root.querySelectorAll<HTMLElement>('[data-guide]').forEach(el => el.classList.toggle('guide-hl', keys.has(el.dataset.guide!)));
+    // Panels rebuild a few times a second; each glow is set to the same phase of one shared clock so
+    // a rebuilt control carries on glowing instead of restarting (0.9 s alternate = 1.8 s cycle).
+    const phase = `-${Math.round(performance.now() % 1800)}ms`;
+    root.querySelectorAll<HTMLElement>('[data-guide]').forEach(el => {
+        const on = keys.has(el.dataset.guide!);
+        if (on && !el.classList.contains('guide-hl')) el.style.animationDelay = phase;
+        el.classList.toggle('guide-hl', on);
+    });
 }
 function applyGuidePulse() {
     const t = guideTarget;
     const open = guideTargetOpen(t);
-    const trophy = trophyWaiting();
+    const trophy = trophyWaiting() && !focusStep;
     const guildOpen = ui.panel?.kind === 'guild';
     benchSiteEl?.classList.toggle('pulse', t?.kind === 'bench' && !open);
     merchantEl?.classList.toggle('pulse', t?.kind === 'merchant' && !open);
@@ -1624,8 +1645,17 @@ function applyGuidePulse() {
             : key === 'guild' ? (t?.kind === 'guild' || trophy) && !guildOpen
             // A quest step in the battle view: the way back to the map pulses.
             : key === 'view' ? ui.view === 'battle' && t?.kind === 'quest' && t.focus !== 'modifier' && !open
+                || t?.kind === 'recall' && !open
             : key === 'quest' ? t?.kind === 'quest' && t.focus === 'modifier' && !open
             : false);
+    }
+    // A plus on the guild hall once the next expansion's fame is reached: green when the gold is there too.
+    const next = nextExpansion(state);
+    const badge = next && state.fame >= next.fame ? state.gold >= next.gold ? 'ready' : 'short' : null;
+    for (const el of [guildSiteEl, hudActionEls.find(a => a.key === 'guild')?.el]) {
+        if (!el) continue;
+        el.classList.toggle('xbadge', !!badge);
+        el.classList.toggle('short', badge === 'short');
     }
     // Controls inside open panels that finish the step.
     markGuide(document.body);
@@ -1641,17 +1671,22 @@ function applyGuidePulse() {
     const heroId = ui.hero ?? state.adventurers[0]?.id;
     heroCards.forEach(card => card.el.classList.toggle('pulse', t?.kind === 'hero' && card.hero.id === heroId && !open));
     // The guidance card hides while its panel is open, and comes back if the panel closes with the step undone.
-    if (guideEl) { guideEl.hidden = open; placeGuide(); }
+    // Focus steps keep their card up, pointing at the control inside the panel.
+    if (guideEl) { guideEl.hidden = open && !focusStep; placeGuide(); }
 }
 // Cards that stay until their step is done: buy from the merchant after the first run, equip what
 // was bought, save for the crafting bench, then craft something.
 
 let guideEl: HTMLElement | null = null;
 let guideSig = '';
-type GuideTarget = {kind: 'quest', key: string, focus?: string} | {kind: 'merchant'} | {kind: 'bench'} | {kind: 'hero'} | {kind: 'guild', focus?: string};
+type GuideTarget = {kind: 'quest', key: string, focus?: string} | {kind: 'merchant'} | {kind: 'bench'} | {kind: 'hero'} | {kind: 'guild', focus?: string} | {kind: 'recall'};
+// Tutorial chains a focus step belongs to. Skipping any step skips the rest of its chain.
+type GuideChain = 'quest' | 'gear' | 'recall' | 'craft' | 'trophy';
+// openText replaces text on a focus step once its panel is open, naming the control to press.
+interface GuideStep {text: string, openText?: string, target: GuideTarget, chain?: GuideChain}
 // The cards only say what to do; the map sites and the controls that do it pulse, so players learn
 // where things are instead of following a shortcut.
-function guideStep(): {text: string, target: GuideTarget} | null {
+function guideStep(): GuideStep | null {
     const g = state.guide ??= {};
     // The first run is over however it ended: a defeat, a full clear, a stop point, or a recall.
     // A hero with a run record who isn't on the road or fighting has finished it.
@@ -1659,26 +1694,48 @@ function guideStep(): {text: string, target: GuideTarget} | null {
         || a.run.number > 1 || (a.activity.kind !== 'fighting' && a.activity.kind !== 'traveling')))) {
         g.firstRunDone = true;
     }
-    const started = state.adventurers.some(a => a.run) || questOrder.some(k => getQuestProgress(state, k).runs > 0);
-    if (!g.firstRunDone && !started && state.adventurers.length) {
+    // A story or tutorial dialog comes first; the steps wait until it's dismissed.
+    if (pendingDialog()) return null;
+    const tutorials = !g.skipAll;
+    const started = anyRunStarted();
+    if (!g.firstRunDone && !started && state.adventurers.length && tutorials && !g.skipped?.quest) {
         const first = questOrder.find(k => isQuestUnlocked(state, k));
         if (first) {
             const hero = state.adventurers.find(a => a.id === ui.hero) ?? state.adventurers[0];
-            return {text: `Send ${hero.name} on a quest: open ${quests[first].name} and start a run to bring back gold and materials.`, target: {kind: 'quest', key: first}};
+            return {text: `Send ${hero.name} on a quest: open ${quests[first].name} and start a run to bring back gold and materials.`, target: {kind: 'quest', key: first}, chain: 'quest', openText: `Press Send to start ${hero.name}'s first run.`};
         }
     }
+    if (!tutorials) return null;
     if (g.firstRunDone && !g.bought && !hasBench(state)) {
-        return {text: 'Visit the merchant to buy equipment and become stronger.', target: {kind: 'merchant'}};
+        // Give the rest a moment first: 5 seconds, or until the hero is back to half HP if sooner.
+        const resting = state.adventurers.find(a => a.activity.kind === 'resting');
+        // The wait starts once "Back at the Guild" is dismissed (a pending dialog returns above). Half HP
+        // only cuts it short if the hero was still under half then.
+        const halfHp = !resting || resting.hp >= getCachedStats(state, resting).maxHealth / 2;
+        if (gearWaitSince === null) { gearWaitSince = performance.now(); gearWaitFromHalf = halfHp; }
+        if (!(halfHp && !gearWaitFromHalf) && performance.now() - gearWaitSince < GEAR_WAIT_MS) return null;
+        return {text: 'Visit the merchant to buy equipment and become stronger.', target: {kind: 'merchant'}, chain: 'gear', openText: 'Buy a piece of gear. Anything here will make your hero stronger.'};
     }
     if (g.bought && !g.equipped) {
         const hero = state.adventurers.find(a => a.id === ui.hero) ?? state.adventurers[0];
-        return {text: `Equip your new gear to become stronger: open ${hero?.name ?? 'your hero'}'s card at the top and pick an equipment slot.`, target: {kind: 'hero'}};
+        return {text: `Equip your new gear to become stronger: open ${hero?.name ?? 'your hero'}'s card at the top and pick an equipment slot.`, target: {kind: 'hero'}, chain: 'gear', openText: 'Pick the slot for your new gear, then choose the item to put it on.'};
     }
+    const recall = recallStep();
+    if (recall) return recall;
     if (g.equipped && !hasBench(state)) {
         return {text: `Save ${BENCH_PRICE} gold for a crafting bench at the merchant, and make your own gear (${Math.min(state.gold, BENCH_PRICE)}/${BENCH_PRICE}).`, target: {kind: 'merchant'}};
     }
-    if (state.benchOwned === true && !g.crafted) {
-        return {text: 'Craft an item at the crafting bench: pick an item type, then add materials.', target: {kind: 'bench'}};
+    if (state.benchOwned === true && !g.crafted && !g.skipped?.craft) {
+        // The lesson starts with every stat filter off, so no item types or materials are hidden.
+        if (!craftFiltersCleared) { craftFiltersCleared = true; ui.statFilters = []; }
+        return craftStep();
+    }
+    // The first trophy: send them to the guild hall to put it in a slot.
+    if (!g.trophyTaught && anyTrophyEquipped()) g.trophyTaught = true;
+    if (!g.trophyTaught && !g.skipped?.trophy && trophyWaiting()) {
+        return {text: 'You have completed an achievement and obtained a new trophy for your guild. Visit the guild to display your new trophy for global bonuses!',
+            target: {kind: 'guild', focus: 'trophy'}, chain: 'trophy',
+            openText: ui.trophyPick != null ? 'Choose your new trophy to display it in this slot.' : 'Pick an empty trophy slot to display your new trophy.'};
     }
     // Once a modifier is unlocked, point at the toggles until one is flipped.
     // A guild that has already run with modifiers (an older save) skips it.
@@ -1696,32 +1753,66 @@ function guideStep(): {text: string, target: GuideTarget} | null {
     }
     return null;
 }
+// When the merchant step first came due this session (see GEAR_WAIT_MS).
+let gearWaitSince: number | null = null;
+let gearWaitFromHalf = false;
+let craftFiltersCleared = false;
+const GEAR_WAIT_MS = 5000;
 let guideTarget: GuideTarget | null = null;
+let guideChain: GuideChain | null = null;
+// A focus step: an early tutorial step whose action can be taken right now. The screen goes grey
+// apart from its card and the control to press, nothing else takes clicks or keys, the game
+// pauses, and Skip / Skip all tutorials sit at the bottom.
+let focusStep = false;
 function renderGuide() {
+    renderDialog();
     const step = guideStep();
     guideTarget = step?.target ?? null;
+    guideChain = step?.chain ?? null;
+    focusStep = !!guideChain;
+    // Leaving focus: the old focus card fades out as a copy while the next card (if any) takes over.
+    // Done before applyGuidePulse, which may hide the old card for the next step's target.
+    if (guideEl?.isConnected && guideEl.classList.contains('focus') && !focusStep && !guideEl.hidden) {
+        const ghost = guideEl.cloneNode(true) as HTMLElement;
+        ghost.classList.add('leaving');
+        ghost.removeAttribute('role');
+        guideEl.replaceWith(ghost);
+        guideEl = null;
+        guideSig = '\u0000';
+        window.setTimeout(() => ghost.remove(), FOCUS_OUT_MS);
+    }
     applyGuidePulse();
-    const sig = step ? step.text : '';
-    if (sig === guideSig && (!guideEl || guideEl.isConnected)) return;
+    const text = step && focusStep && step.openText && guideTargetOpen(step.target) ? step.openText : step?.text ?? '';
+    const sig = step ? `${step.chain ?? ''}|${text}` : '';
+    if (sig === guideSig && (!guideEl || guideEl.isConnected)) { placeGuide(); return; }
     guideSig = sig;
     guideEl?.remove();
-    guideEl = step ? h('div', {class: 'guidecard', role: 'status'},
-        h('span', {class: 'grow'}, step.text),
+    guideEl = step ? h('div', {class: 'guidecard' + (focusStep ? ' focus' : ''), role: 'status'},
+        h('span', {class: 'grow'}, text),
     ) : null;
     if (guideEl) {
-        guideEl.hidden = guideTargetOpen(guideTarget);
+        guideEl.hidden = guideTargetOpen(guideTarget) && !focusStep;
         guideEl.appendChild(h('span', {class: 'guidearrow', 'aria-hidden': 'true'}));
         document.body.appendChild(guideEl);
     }
+    if (focusStep) { skipBarEl.hidden = false; skipBarEl.classList.remove('leaving'); window.clearTimeout(barTimer); }
+    else if (!skipBarEl.hidden && !skipBarEl.classList.contains('leaving')) {
+        skipBarEl.classList.add('leaving');
+        barTimer = window.setTimeout(() => { skipBarEl.hidden = true; skipBarEl.classList.remove('leaving'); }, FOCUS_OUT_MS);
+    }
     placeGuide();
 }
+let barTimer = 0;
 // The element the guidance card points at: the HUD button for a place, the hero's HUD card, or for a
 // quest the map site (the battle view's way back to the map while in battle).
 function guideAnchor(): HTMLElement | null {
     const t = guideTarget;
     if (!t) return null;
+    // A focus step with its panel open points at the control to press.
+    if (focusStep && guideTargetOpen(t)) return focusTargets()[0] ?? null;
     const hud = (key: string) => hudActionEls.find(a => a.key === key)?.el ?? null;
     switch (t.kind) {
+        case 'recall': return hud('view');
         case 'merchant': return hud('merchant');
         case 'bench': return hud('bench');
         case 'guild': return hud('guild');
@@ -1740,11 +1831,21 @@ function placeGuide() {
     const el = guideEl;
     const showing = !!el && el.isConnected && !el.hidden;
     document.body.classList.toggle('guiding', showing);
+    updateVeil();
     if (!showing) return;
     const anchor = guideAnchor();
-    const r = anchor?.isConnected ? anchor.getBoundingClientRect() : null;
+    // Crafting steps inside the open bench, and the buy step in the merchant: the card sits above all
+    // the lit choices (their combined box), so it covers none of them; below only when there's no room above.
+    const group = focusStep && (guideTarget?.kind === 'bench' || guideTarget?.kind === 'merchant') && guideTargetOpen(guideTarget) ? focusTargets() : [];
+    // Merchant offers: the whole offer card counts, so the card doesn't cover an item's name.
+    const r = group.length ? unionRect(group.map(e => e.closest<HTMLElement>('.shopcard') ?? e)) : anchor?.isConnected ? anchor.getBoundingClientRect() : null;
     const vw = document.documentElement.clientWidth, vh = window.innerHeight;
     if (!r || !r.width) {
+        // A focus card that loses its anchor (a skip, or the step just finished) stays where it was
+        // while it fades out, instead of jumping to the floating spot.
+        // (Also while the step is still marked current: a click that finishes it re-renders the panels
+        // before the guide catches up, e.g. Craft + equip.)
+        if (el.classList.contains('focus') && el.style.top && !el.classList.contains('floating')) { guideFrame = requestAnimationFrame(placeGuide); return; }
         el.classList.add('floating');
         el.style.left = el.style.top = '';
     } else {
@@ -1752,14 +1853,310 @@ function placeGuide() {
         const w = el.offsetWidth, hgt = el.offsetHeight, gap = 12;
         const cx = r.left + r.width / 2;
         const left = Math.max(8, Math.min(vw - w - 8, cx - w / 2));
-        const below = r.bottom + gap + hgt <= vh - 8 || r.top - gap - hgt < 8;
+        const roomBelow = r.bottom + gap + hgt <= vh - 8, roomAbove = r.top - gap - hgt >= 8;
+        const below = group.length ? !roomAbove && roomBelow : roomBelow || !roomAbove;
         el.classList.toggle('above', !below);
         el.style.left = `${Math.round(left)}px`;
-        el.style.top = `${Math.round(below ? r.bottom + gap : r.top - gap - hgt)}px`;
+        el.style.top = `${Math.round(below ? r.bottom + gap : Math.max(8, r.top - gap - hgt))}px`;
         el.style.setProperty('--arrow-x', `${Math.round(Math.max(14, Math.min(w - 14, cx - left)))}px`);
     }
     guideFrame = requestAnimationFrame(placeGuide);
 }
+
+function unionRect(els: HTMLElement[]): {left: number, right: number, top: number, bottom: number, width: number, height: number} {
+    const rs = els.map(e => e.getBoundingClientRect());
+    const left = Math.min(...rs.map(r => r.left)), right = Math.max(...rs.map(r => r.right));
+    const top = Math.min(...rs.map(r => r.top)), bottom = Math.max(...rs.map(r => r.bottom));
+    return {left, right, top, bottom, width: right - left, height: bottom - top};
+}
+
+// ---------------- Onboarding: focus steps, skips and dialogs (v342) ----------------
+
+function anyRunStarted(): boolean {
+    return state.adventurers.some(a => a.run) || questOrder.some(k => getQuestProgress(state, k).runs > 0);
+}
+// Elements on screen matching a selector: laid out, in the viewport, and not covered by something
+// else (a map site under the battle view). The veil, card and Skip bar are ignored for the test.
+function visibleEls(selector: string): HTMLElement[] {
+    const overlays = [veilEl, skipBarEl, guideEl].filter((el): el is HTMLElement => !!el);
+    const before = overlays.map(el => el.style.pointerEvents);
+    overlays.forEach(el => { el.style.pointerEvents = 'none'; });
+    const out = [...document.querySelectorAll<HTMLElement>(selector)].filter(el => {
+        const r = el.getBoundingClientRect();
+        if (!(r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < window.innerHeight && r.left < window.innerWidth)) return false;
+        const x = Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2)), y = Math.min(window.innerHeight - 1, Math.max(0, r.top + r.height / 2));
+        const hit = document.elementFromPoint(x, y);
+        return !!hit && (hit === el || el.contains(hit) || hit.contains(el));
+    });
+    overlays.forEach((el, i) => { el.style.pointerEvents = before[i]; });
+    return out;
+}
+// What a focus step lets the player press: the control inside the open panel, or else the pulsing
+// map site and HUD button (or hero card) that open it.
+function focusTargets(): HTMLElement[] {
+    const t = guideTarget;
+    if (!t || !focusStep) return [];
+    if (guideTargetOpen(t)) {
+        const key = guideFocusKey(t);
+        return key ? visibleEls(`[data-guide="${key}"].guide-hl`) : [];
+    }
+    return visibleEls('.pulse');
+}
+// The encounter strip tutorial: after the first gear is on (or that chain is skipped), have the
+// hero turn back at the third C of their quest. Skipped for a guild that has used the strip, and
+// for one already past the first craft (saves from before this step existed).
+function thirdCommon(questKey: string): number | undefined {
+    return quests[questKey].encounters.map((e, i) => e.tier === 'C' ? i : -1).filter(i => i >= 0)[2];
+}
+function recallStep(): GuideStep | null {
+    const g = state.guide ??= {};
+    if (!g.equipped || g.recallTaught || g.stripUsed || g.crafted || g.skipAll || g.skipped?.recall) return null;
+    // A stop point short of the end means the strip has been used.
+    if (state.adventurers.some(a => a.run && a.run.stopAt < quests[a.run.questKey].encounters.length - 1)) { g.stripUsed = true; return null; }
+    const hero = state.adventurers.find(a => a.id === ui.hero) ?? state.adventurers[0];
+    const run = hero?.run;
+    const third = run ? thirdCommon(run.questKey) : undefined;
+    if (!run || quests[run.questKey].endless || third === undefined || !hero.assignment) return null;
+    // Wait for the hero's next arrival at that encounter, then hold it there until the lesson is done.
+    if (!g.stripDue) {
+        const a = hero.activity;
+        if (a.kind !== 'fighting' || a.questKey !== run.questKey || a.encounterIndex < third) return null;
+        g.stripDue = true;
+    }
+    const strip = visibleEls('[data-guide="recall"]').length > 0;
+    const text = strip
+        ? `Runs don't have to go all the way. Click this third C on the encounter strip and ${hero.name} will head home after this fight, keeping what they found. Heroes recover much faster when they retreat before they are defeated.`
+        : ui.panel?.kind === 'adventurer'
+            ? `${hero.name} has reached the third encounter. Press Show run to watch, and to see the encounter strip.`
+            : `${hero.name} has reached the third encounter. Open the battle to see the encounter strip.`;
+    return {text, target: {kind: 'recall'}, chain: 'recall'};
+}
+
+// The crafting lesson, from buying the bench to the first craft: open the bench (its map site or
+// the HUD button), pick an item type a material in storage can make, fill the first base slot,
+// then add a decoration or close the picker, then Craft or Craft + equip.
+function craftFocusKey(): string {
+    if (!state.guide?.craftTypePicked) return 'craft-type';
+    if (!ui.bench.base.length) return 'craft-base';
+    return ui.picker ? 'craft-deco' : 'craft-make';
+}
+function craftStep(): GuideStep {
+    const key = ui.benchOpen ? craftFocusKey() : null;
+    const narrow = narrowScreen.matches;
+    const text = !key ? 'You have a crafting bench. Open it to make your own gear from the materials your heroes bring back.'
+        : key === 'craft-type' ? (narrow && !ui.typeOpen ? 'Pick an item type to craft: open the item type list.' : 'Pick an item type that one of your materials can make. The lit ones can.')
+        : key === 'craft-base' ? (ui.picker?.kind === 'base' ? 'Choose a base material. It sets the item\'s main stats.' : 'Press Add base material to choose what the item is made of.')
+        : key === 'craft-deco' ? 'Add a decoration for extra stats, or close the picker to skip it.'
+        : 'Make it: Craft + equip puts it straight on your hero, or Craft keeps it in storage.';
+    return {text, target: {kind: 'bench'}, chain: 'craft'};
+}
+
+function skipChain(chain: GuideChain) {
+    const g = state.guide ??= {};
+    g.skipped = {...g.skipped, [chain]: true};
+    // Skipping the gear lessons unlocks what finishing them would: Buy + Equip at the merchant.
+    if (chain === 'gear') Object.assign(g, {bought: true, equipped: true, manualEquip: true});
+    if (chain === 'recall') g.recallTaught = true;
+    // Skipping the crafting lesson counts as the first craft, which is what later steps wait on.
+    if (chain === 'craft') g.crafted = true;
+    if (chain === 'trophy') g.trophyTaught = true;
+}
+function skipAllTutorials() {
+    const g = state.guide ??= {};
+    for (const chain of ['quest', 'gear', 'recall', 'craft', 'trophy'] as const) skipChain(chain);
+    g.skipAll = true;
+    // Tutorial dialogs go too; story dialogs still show.
+    g.seen = {...g.seen, ...Object.fromEntries(dialogs.filter(d => !d.story).map(d => [d.key, true]))};
+}
+const skipBarEl = h('div', {class: 'skipbar', role: 'group', 'aria-label': 'Tutorial'},
+    h('span', {class: 'muted small'}, 'Game paused'),
+    h('button', {class: 'btn', onclick: () => { if (guideChain) skipChain(guideChain); afterSkip(); }}, 'Skip'),
+    h('button', {class: 'btn', onclick: () => { skipAllTutorials(); afterSkip(); }}, 'Skip all tutorials'),
+);
+skipBarEl.hidden = true;
+document.body.appendChild(skipBarEl);
+function afterSkip() {
+    saveGame(state);
+    renderAll();
+}
+// The grey veil: greys out and blocks the screen apart from holes over the focus targets.
+const veilEl = h('div', {class: 'focusveil', 'aria-hidden': 'true'});
+document.body.appendChild(veilEl);
+let veilSig = '';
+let scrolledFor = '';
+function updateVeil() {
+    const targets = focusStep && !dialogEl ? focusTargets() : [];
+    // A target scrolled out of its panel is brought into view, once per step.
+    const onScreen = (el: HTMLElement) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= window.innerHeight; };
+    if (focusStep && !dialogEl && !targets.some(onScreen) && guideTarget && guideTargetOpen(guideTarget)) {
+        const key = guideFocusKey(guideTarget);
+        const hidden = key ? document.querySelector<HTMLElement>(`[data-guide="${key}"].guide-hl`) : null;
+        if (hidden && scrolledFor !== guideSig) { scrolledFor = guideSig; hidden.scrollIntoView({block: 'center'}); }
+    }
+    // A step whose control isn't on screen at all (nothing affordable) doesn't lock up.
+    const on = targets.length > 0;
+    const focusing = focusStep && !dialogEl;
+    // Entering focus: clicks are blocked at once, the grey fades in, then the game pauses, then the
+    // card fades in, and the Skip bar last. The next step of a chain keeps the grey up and only fades
+    // its new card in. Leaving: the card and bar fade out, then the grey, which no longer blocks
+    // clicks; a focus step that comes back while it fades picks up where it was, with no restart.
+    if (!focusing) {
+        if (focusSince !== null && veilEl.classList.contains('on') && !dialogEl) {
+            veilEl.classList.add('leaving');
+            // The fade covers the whole screen: holes over controls that just closed (a picker row,
+            // a trophy choice) would otherwise show as clear gaps in the grey.
+            veilEl.style.clipPath = 'none';
+            veilSig = '';
+            window.clearTimeout(veilTimer);
+            veilTimer = window.setTimeout(() => { veilEl.classList.remove('on', 'leaving'); veilSig = ''; }, FOCUS_OUT_MS + VEIL_OUT_MS);
+        }
+        focusSince = null;
+    } else if (focusSince === null) {
+        const resumed = veilEl.classList.contains('leaving');
+        focusSince = performance.now() - (resumed ? FOCUS_FADE_MS + FOCUS_CARD_MS : 0);
+        if (resumed) { window.clearTimeout(veilTimer); veilEl.classList.remove('leaving'); }
+    }
+    const since = focusSince === null ? 0 : performance.now() - focusSince;
+    document.body.classList.toggle('focusing', focusing);
+    document.body.classList.toggle('focus-card', focusing && since >= FOCUS_FADE_MS);
+    document.body.classList.toggle('focus-bar', focusing && since >= FOCUS_FADE_MS + FOCUS_CARD_MS);
+    if (veilEl.classList.contains('leaving')) return;
+    // Between steps of a chain the targets can vanish for a moment (a panel opening): the grey holds
+    // for a short while instead of flashing off and fading back in.
+    if (on || !focusing) noTargetsSince = null;
+    else noTargetsSince ??= performance.now();
+    if (!on && focusing && veilEl.classList.contains('on') && performance.now() - noTargetsSince! < VEIL_HOLD_MS) return;
+    veilEl.classList.toggle('on', on);
+    if (!on) { veilSig = ''; return; }
+    const W = window.innerWidth, H = window.innerHeight, pad = 6;
+    let d = `M0 0H${W}V${H}H0Z`;
+    for (const el of targets) {
+        const r = el.getBoundingClientRect();
+        const x = Math.round(r.left - pad), y = Math.round(r.top - pad), w = Math.round(r.width + 2 * pad), hh = Math.round(r.height + 2 * pad);
+        d += `M${x} ${y}h${w}v${hh}h${-w}Z`;
+    }
+    // The Skip bar sits at the bottom unless a target is there (the battle view's encounter strip).
+    const bw = skipBarEl.offsetWidth, bh = skipBarEl.offsetHeight;
+    const bar = {left: (W - bw) / 2, right: (W + bw) / 2, top: H - 16 - bh - pad, bottom: H};
+    skipBarEl.classList.toggle('top', targets.some(el => {
+        const r = el.getBoundingClientRect();
+        return r.right > bar.left && r.left < bar.right && r.bottom > bar.top && r.top < bar.bottom;
+    }));
+    if (d === veilSig) return;
+    veilSig = d;
+    veilEl.style.clipPath = `path(evenodd, '${d}')`;
+}
+// When the current run of focus steps began, for the staged entry (updateVeil).
+let focusSince: number | null = null;
+const FOCUS_FADE_MS = 450, FOCUS_CARD_MS = 300, FOCUS_OUT_MS = 250, VEIL_OUT_MS = 400;
+let veilTimer = 0;
+let noTargetsSince: number | null = null;
+const VEIL_HOLD_MS = 600;
+function gamePaused(): boolean {
+    // A focus step pauses once the grey has faded in.
+    return !!dialogEl || (focusStep && !!guideEl?.isConnected && focusSince !== null && performance.now() - focusSince >= FOCUS_FADE_MS);
+}
+
+// Story and tutorial dialogs: large text with an Okay button, an X, and Enter or Escape to close.
+// Each shows once per save. Skip all tutorials skips the tutorial ones, never the story.
+// when: the dialog is due (and holds back guide steps). ready: it can show now (default yes).
+interface DialogDef {key: string, story?: boolean, title: string, text: () => string, button: string, when: () => boolean, ready?: () => boolean}
+const heroName = () => (state.adventurers.find(a => a.id === ui.hero) ?? state.adventurers[0])?.name ?? 'Your hero';
+const dialogs: DialogDef[] = [
+    {key: 'opening', story: true, title: 'Shadows on the Road', button: 'Begin',
+        text: () => 'Something is stirring in the wilds. Travelers vanish on roads that were safe a season ago, and stranger beasts creep closer to the villages every night. Raise a guild of heroes, arm them well, and push into the wilds to find the source of the threat before it reaches your door.',
+        // A new guild only: nothing run, bought or crafted yet.
+        when: () => !anyRunStarted() && !state.guide?.firstRunDone && !state.guide?.bought && !state.guide?.crafted},
+    // A story beat the first time each quest is set out on, and the first time its final rare falls.
+    // Bramble Road's also explains how a run works (it replaced the "Off to Fight" dialog).
+    ...questOrder.filter(k => questStory[k]).flatMap((k): DialogDef[] => [
+        {key: `start:${k}`, story: true, title: questStory[k].start.title, button: k === 'brambleRoad' ? 'Got it' : 'Onward',
+            text: () => questStory[k].start.text + (k === 'brambleRoad' ? `\n\n${heroName()} will fight monster after monster until they are defeated or recalled. The gold and materials they win come back with them.` : ''),
+            when: () => storyReady() && (getQuestProgress(state, k).runs > 0 || state.adventurers.some(a => a.run?.questKey === k)),
+            // A moment after the hero sets out, so it doesn't snap up on the Send press.
+            ready: () => dueFor(`start:${k}`, STORY_DELAY_MS)},
+        {key: `clear:${k}`, story: true, title: questStory[k].clear.title, button: 'Onward',
+            text: () => questStory[k].clear.text,
+            when: () => storyReady() && getQuestProgress(state, k).fullClears > 0},
+    ]),
+    {key: 'firstRecovery', title: 'Back at the Guild', button: 'Got it',
+        text: () => 'After each run, heroes recover at the guild before setting out again. You can pay gold to recover instantly.',
+        when: () => !!state.guide?.firstRunDone && !state.guide?.bought && !hasBench(state),
+        // On screen, wait until the fight has cleared and the view has faded to the guild.
+        ready: () => !combatView.el.isConnected || combatView.restShown() || !state.adventurers.some(a => a.activity.kind === 'resting')},
+];
+// Saves from before the story beats: quests already started or cleared are marked as seen, once,
+// so an old guild isn't shown a backlog. A guild that saw "Off to Fight" has seen Bramble Road's.
+function storyReady(): boolean {
+    const g = state.guide ??= {};
+    if (!g.storySeeded) {
+        g.storySeeded = true;
+        const seen: Record<string, boolean> = {...g.seen};
+        if (seen.firstQuest) seen['start:brambleRoad'] = true;
+        for (const k of questOrder) {
+            const p = getQuestProgress(state, k);
+            if (p.runs > 0 && !state.adventurers.some(a => a.run?.questKey === k && a.run.number <= 1 && p.runs <= 1 && !g.firstRunDone)) seen[`start:${k}`] = true;
+            if (p.fullClears > 0) seen[`clear:${k}`] = true;
+        }
+        g.seen = seen;
+    }
+    return true;
+}
+// True once a dialog has been due for ms; schedules a dialog check for that moment.
+const dueAt: Record<string, number> = {};
+const STORY_DELAY_MS = 500;
+function dueFor(key: string, ms: number): boolean {
+    const now = performance.now();
+    if (dueAt[key] === undefined) { dueAt[key] = now; window.setTimeout(() => renderDialog(), ms + 20); }
+    return now - dueAt[key] >= ms;
+}
+function pendingDialog(): DialogDef | null {
+    const g = state.guide ?? {};
+    return dialogs.find(d => !g.seen?.[d.key] && (d.story || !g.skipAll) && d.when()) ?? null;
+}
+let dialogEl: HTMLElement | null = null;
+let dialogKey: string | null = null;
+function renderDialog() {
+    const due = pendingDialog();
+    const d = due && (due.ready?.() ?? true) ? due : null;
+    if ((d?.key ?? null) === dialogKey && (!dialogEl || dialogEl.isConnected)) return;
+    dialogEl?.remove();
+    dialogEl = null;
+    dialogKey = d?.key ?? null;
+    if (!d) return;
+    const ok = h('button', {class: 'btn primary', onclick: () => dismissDialog()}, d.button);
+    dialogEl = h('div', {class: 'dialogveil'},
+        h('section', {class: 'dialog' + (d.story ? ' story' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dialog-title'},
+            h('button', {class: 'dialogx', 'aria-label': 'Close', title: 'Close (Esc)', onclick: () => dismissDialog()}, '×'),
+            h('h2', {id: 'dialog-title'}, d.title),
+            ...d.text().split('\n\n').map(t => h('p', null, t)),
+            h('div', {class: 'dialogbtns'}, ok),
+        ));
+    document.body.appendChild(dialogEl);
+    ok.focus({preventScroll: true});
+}
+function dismissDialog() {
+    if (!dialogKey) return;
+    const g = state.guide ??= {};
+    g.seen = {...g.seen, [dialogKey]: true};
+    saveGame(state);
+    renderAll();
+}
+// While a dialog or focus step shows, keys only reach it: Enter or Escape closes a dialog, and a
+// focus step lets Tab move and Enter or Space press only its own targets.
+window.addEventListener('keydown', event => {
+    if (dialogEl) {
+        if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); dismissDialog(); }
+        else if (event.key !== 'Tab') event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+    }
+    if (!focusStep || !veilEl.classList.contains('on') || event.key === 'Tab') return;
+    const active = document.activeElement as HTMLElement | null;
+    if ((event.key === 'Enter' || event.key === ' ') && active && focusTargets().some(t => t === active || t.contains(active))) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+}, true);
 
 // ---------------- Drop toasts ----------------
 // A first-ever material gets a prominent card that opens its detail card. A material you hold
@@ -1853,9 +2250,7 @@ function renderDrops() {
         ...cards.map(t => closable(t, (() => {
             if (t.trophy) {
                 const def = trophies[t.trophy.key];
-                const equipped = (state.trophySlots ?? []).includes(t.trophy.key);
-                // The first trophy's card stays until one is equipped and points at the guild hall instead
-                // of opening it, so the player learns where trophies go.
+                // The first trophy's card stays until one is equipped; the first-trophy tutorial teaches where it goes.
                 if (def.kind === 'endless') {
                     return h('button', {class: `dropcard trophycard tier${t.trophy.tier}`, onclick: () => equipFromCard(t)},
                         h('div', {class: 'dropkicker'}, `Banner earned · +${t.trophy.fame} fame`),
@@ -1864,19 +2259,11 @@ function renderDrops() {
                         h('div', {class: 'small muted'}, 'Always in effect'),
                         h('div', {class: 'row', style: 'margin-top:4px'}, h('span', {class: 'btn small primary'}, 'See banners')));
                 }
-                if (t.expires === Infinity) {
-                    return h('div', {class: `dropcard trophycard tier${t.trophy.tier}`},
-                        h('div', {class: 'dropkicker'}, `Trophy earned · +${t.trophy.fame} fame`),
-                        h('div', {class: 'dropname'}, `${def.name} · ${trophyTierName(def, t.trophy.tier)}`),
-                        h('div', {class: 'small muted tbonus'}, def.bonusText(def.tiers[t.trophy.tier].bonus)),
-                        h('div', {class: 'small', style: 'margin-top:4px'}, 'Open the guild hall on the map and put it in a trophy slot.'),
-                    );
-                }
                 return h('button', {class: `dropcard trophycard tier${t.trophy.tier}`, onclick: () => equipFromCard(t)},
                     h('div', {class: 'dropkicker'}, `Trophy earned · +${t.trophy.fame} fame`),
                     h('div', {class: 'dropname'}, `${def.name} · ${trophyTierName(def, t.trophy.tier)}`),
                     h('div', {class: 'small muted tbonus'}, def.bonusText(def.tiers[t.trophy.tier].bonus)),
-                    h('div', {class: 'row', style: 'margin-top:4px'}, h('span', {class: 'btn small primary'}, equipped ? 'See trophies' : 'Equip')),
+                    h('div', {class: 'small tcta'}, 'Click to view guild trophies'),
                 );
             }
             const material = requireMaterial(t.material);
@@ -1936,7 +2323,9 @@ function frame(now: number) {
     // Clamp long gaps (a hidden tab) so the game never fast-forwards. There is no offline progress.
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    accumulator += dt * speed * timeScale(now);
+    // Dialogs and focus steps hold the game still: no runs, regen or clock until they're done.
+    if (gamePaused()) accumulator = 0;
+    else accumulator += dt * speed * timeScale(now);
     setCombatSpeed(speed);
     // The merchant's open stock doesn't restock on a level-up (its next New stock is free instead).
     setHoldLevelRestock(ui.shopOpen ? (state.adventurers.find(a => a.id === ui.hero) ?? state.adventurers[0])?.id ?? null : null);
@@ -1968,7 +2357,9 @@ function frame(now: number) {
         updateMap();
         renderGuide();
         // Panels show live numbers, so refresh them a few times a second.
-        if (!detailOpen()) { renderPanelNow(); applyGuidePulse(); }
+        // Nothing changes while the game is paused (a tutorial step), so the panels hold still: a
+        // rebuild under the pointer would restart hover effects.
+        if (!detailOpen() && !gamePaused()) { renderPanelNow(); applyGuidePulse(); }
         saveView();
     }
     sinceSave += dt;

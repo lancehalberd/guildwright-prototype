@@ -546,7 +546,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pickrow > .item { border: none; }
 .pickrow.selected > .item, .pickrow.selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .pickrow.locked .pickname { opacity: 0.6; }
-.pickrow.pickable { cursor: pointer; transition: background 0.12s; }
+.pickrow.pickable { cursor: pointer; }
+/* No hover transition: rows are rebuilt a few times a second, and a transition would replay each time. */
 /* The card highlights on hover, except while the pointer is on a stat link or the info button. */
 .pickrow.pickable:hover:not(:has(.statlink:hover, .info:hover)) { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .pickrow.pickable:has(.pickname:focus-visible) { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
@@ -1739,3 +1740,115 @@ body.no-item-icons .craftedbody .mods, body.no-item-icons .gearopt .mods { font-
     .hud-heroes { flex-wrap: nowrap; }
     .hud-heroes > .herocard { flex: none; }
 }
+
+/* ---------------- Onboarding (v342) ----------------
+   Focus steps: a fixed veil greys and blocks the whole screen except holes cut over the controls to
+   press (main.ts updateVeil sets an evenodd clip-path). The card and Skip bar sit above it. */
+.focusveil { position: fixed; inset: 0; z-index: 900; display: none; background: rgba(20, 18, 14, 0.28);
+    -webkit-backdrop-filter: grayscale(1) brightness(0.85); backdrop-filter: grayscale(1) brightness(0.85); }
+.focusveil.on { display: block; animation: veil-in 450ms ease-out both; }
+/* Fading out: the card and bar go first (250ms), then the grey (400ms); clicks pass through. */
+.focusveil.on.leaving { pointer-events: none; animation: veil-out 400ms ease-in 250ms both; }
+@keyframes veil-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes veil-out { from { opacity: 1; } to { opacity: 0; } }
+/* Staged entry (main.ts updateVeil): the card, then the Skip bar, fade in after the grey. A new
+   card within a chain fades in on its own. */
+body.focusing:not(.focus-card) > .guidecard.focus { opacity: 0; }
+body.focus-card > .guidecard.focus { animation: veil-in 300ms ease-out both; }
+body.focusing:not(.focus-bar) .skipbar { opacity: 0; pointer-events: none; }
+body.focus-bar .skipbar:not(.leaving) { animation: veil-in 300ms ease-out both; }
+body > .guidecard.leaving, .skipbar.leaving { pointer-events: none; animation: veil-out 250ms ease-in both; }
+@media (prefers-reduced-motion: reduce) { .focusveil.on, .focusveil.on.leaving, body.focus-card > .guidecard.focus, body.focus-bar .skipbar, body > .guidecard.leaving, .skipbar.leaving { animation-duration: 1ms; animation-delay: 0ms; } }
+body > .guidecard.focus { z-index: 910; font-size: 19px; line-height: 1.4; padding: 14px 18px; max-width: min(480px, calc(100vw - 16px)); border-left-width: 6px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); }
+body > .guidecard.focus.floating { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+.skipbar { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 910;
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: 12px; background: var(--surface);
+    border: 1px solid var(--line); box-shadow: 0 6px 18px var(--shadow); white-space: nowrap; }
+.skipbar[hidden] { display: none; }
+body.focusing .toast, body.focusing .drops { display: none; }
+
+/* Story and tutorial dialogs. They ease in: the shade fades, the card rises a little. */
+.dialogveil { animation: veil-in 350ms ease-out both; }
+.dialog { animation: dialog-in 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .dialogveil, .dialog { animation-duration: 1ms; } }
+.dialogveil { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 16px; background: rgba(12, 10, 8, 0.55); }
+.dialog { position: relative; box-sizing: border-box; width: min(560px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; padding: 26px 28px 22px;
+    border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45); }
+.dialog h2 { margin: 0 32px 12px 0; font-family: var(--font-display); font-size: 26px; }
+.dialog p { margin: 0; font-size: 19px; line-height: 1.55; }
+.dialog p + p { margin-top: 12px; }
+.dialog.story { border-top: 5px solid var(--tier-l); }
+.dialog.story p { font-size: 20px; }
+.dialogbtns { display: flex; justify-content: flex-end; margin-top: 22px; }
+.dialogbtns .btn { font-size: 16px; padding: 9px 22px; }
+.dialogx { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border: none; border-radius: 8px; background: none;
+    color: var(--ink-soft); font-size: 24px; line-height: 1; cursor: pointer; }
+.dialogx:hover { color: var(--ink); background: var(--line); }
+@media (max-width: 640px) { .dialog { padding: 22px 20px 18px; } .dialog p { font-size: 17px; } .dialog h2 { font-size: 22px; } }
+.skipbar.top { bottom: auto; top: 72px; }
+/* The focus card's call to action grows with the screen, and the Skip bar's text stays about a
+   quarter smaller than it so the bar never pulls the eye from the card (Chris). */
+.skipbar .small { font-size: 14px; }
+.skipbar .btn { font-size: 14px; }
+@media (min-width: 1100px) and (min-height: 700px) {
+    body > .guidecard.focus { font-size: 24px; max-width: 560px; padding: 16px 22px; }
+    .skipbar { gap: 14px; padding: 10px 12px 10px 18px; border-radius: 14px; }
+    .skipbar .small { font-size: 17px; }
+    .skipbar .btn { font-size: 18px; padding: 7px 16px; border-radius: 9px; }
+}
+@media (min-width: 1500px) and (min-height: 860px) {
+    body > .guidecard.focus { font-size: 30px; max-width: 680px; padding: 20px 26px; border-left-width: 8px; }
+    .skipbar { gap: 18px; padding: 12px 16px 12px 22px; border-radius: 18px; }
+    .skipbar .small { font-size: 21px; }
+    .skipbar .btn { font-size: 22px; padding: 10px 22px; border-radius: 12px; }
+    .skipbar.top { top: 76px; }
+}
+.dropcard .tcta { margin-top: 4px; font-weight: 700; color: var(--accent); }
+
+/* v345: a plus on the guild hall (map and HUD) when the next expansion's fame is reached. Green when
+   the gold is there too, grey while more gold is needed. */
+.hudact { position: relative; }
+.site.xbadge .glyph::after, .hudact.xbadge::after {
+    content: '+'; position: absolute; top: -5px; right: -5px; width: 20px; height: 20px; border-radius: 50%;
+    background: #2f9a45; color: #fff; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+    font: 800 17px/19px system-ui, sans-serif; text-align: center; pointer-events: none; z-index: 2;
+}
+.site.xbadge .glyph.guildart::after { top: auto; bottom: calc(var(--gh) - 16px); right: calc(50% - var(--gw) / 2 - 4px); }
+.hudact.xbadge::after { width: 15px; height: 15px; top: -4px; right: -5px; font-size: 13px; line-height: 14px; border-width: 1.5px; }
+.site.xbadge.short .glyph::after, .hudact.xbadge.short::after { background: #8b8b8b; }
+
+/* v345: the next guild expansion as one clickable card: the hall as it stands with chevrons rising
+   beside it, the fame bar, what it opens and the price. */
+.expandcard {
+    display: flex; gap: 12px; align-items: center; width: 100%; padding: 10px 12px; text-align: left; font: inherit; color: inherit;
+    border: 2px solid var(--line); border-radius: 10px; background: var(--surface-2); cursor: default;
+}
+.expandcard.can { border-color: #2f9a45; cursor: pointer; background: color-mix(in srgb, #2f9a45 9%, var(--surface-2)); box-shadow: 0 2px 0 color-mix(in srgb, #2f9a45 55%, black); }
+.expandcard.can:hover { transform: translateY(-1px); filter: brightness(1.04); }
+.expandcard.short { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.expandcard .xart { position: relative; flex: none; width: 112px; height: 100px; display: grid; place-items: end center; }
+.expandcard .xart img { image-rendering: auto; filter: drop-shadow(0 3px 4px var(--shadow)); }
+.expandcard.locked .xart img { filter: grayscale(0.7) opacity(0.75); }
+.expandcard .xarrows { position: absolute; right: -4px; top: 0; width: 22px; height: 38px; }
+.expandcard .xarrows svg { width: 100%; height: 100%; fill: none; stroke: #2f9a45; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 1px 0 #fff) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4)); }
+.expandcard:not(.can) .xarrows svg { stroke: #8b8b8b; }
+.expandcard.can .xarrows svg path { animation: xrise 1.2s ease-in-out infinite; }
+.expandcard.can .xarrows svg path:nth-child(2) { animation-delay: 0.15s; }
+.expandcard.can .xarrows svg path:nth-child(3) { animation-delay: 0.3s; }
+@keyframes xrise { 0%, 100% { transform: translateY(0); opacity: 1; } 50% { transform: translateY(-3px); opacity: 0.6; } }
+@media (prefers-reduced-motion: reduce) { .expandcard.can .xarrows svg path { animation: none; } }
+.expandcard .xbody { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.expandcard .xkicker { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); }
+.expandcard .xtitle { font-family: var(--font-display); font-weight: 700; font-size: 17px; line-height: 1.1; }
+.expandcard .xfame { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.expandcard .xfame .num { font-family: var(--font-data); white-space: nowrap; }
+.expandcard .xbar { flex: 1; height: 7px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.expandcard .xbar span { display: block; height: 100%; background: var(--accent); }
+.expandcard.can .xbar span, .expandcard.short .xbar span { background: #2f9a45; }
+.expandcard .xopens { display: flex; flex-wrap: wrap; gap: 4px; }
+.expandcard .chip { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); white-space: nowrap; }
+.expandcard .xcta { align-self: flex-start; margin-top: 2px; font-weight: 700; font-size: 13px; padding: 4px 12px; border-radius: 6px; background: var(--line); color: var(--ink-soft); font-family: var(--font-data); }
+.expandcard.can .xcta { background: #2f9a45; color: #fff; }
+@media (max-width: 520px) { .expandcard .xart { width: 84px; height: 80px; } .expandcard .xart img { max-width: 76px; max-height: 76px; object-fit: contain; } }

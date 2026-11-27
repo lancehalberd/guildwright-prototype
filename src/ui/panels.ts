@@ -19,7 +19,9 @@ import {challengeModifier, TRIAL_MONSTER, TRIAL_PREMIUM, TRIAL_STEP, VOID_KEY, V
 import {trophyBanner, trophyCase, trophyLabel} from './trophyArt';
 import {BLOCK_CAP, effectiveLevel, wornSignatures, expectedCritMultiplier, expectedHits, getCachedStats, hitChance, hitRating, mitigateHit, resolveItemRef, RESIST_CAP, totalXpForLevel} from '../engine/stats';
 import type {Adventurer, BaseStats, CraftedItem, MaterialDef, DamageMap, DamageType, GameState, ItemRef, ItemStats, ItemTypeKey, ModValue, MonsterModStat, QuestDef, QuestModifierDef, RewardBonuses, RunStats, SlotKey, StatKey, Tier} from '../engine/types';
-import {fmt, h, num, type Listened} from './dom';
+import {fmt, h, num, svg, type Listened} from './dom';
+import {siteArtUrl} from './mapArt';
+import {guildHallSizes} from './guildSizes';
 import {signatures} from '../data/signatures';
 import {bestDelta, deltaColumn, deltaLine, deltaLines} from './compareView';
 import {autoEquip} from '../engine/autoEquip';
@@ -464,7 +466,7 @@ function adventurerPanel(ctx: Ctx, adventurer: Adventurer): HTMLElement {
         h('span', {class: 'grow muted'}, adventurer.assignment
             ? `On ${quests[adventurer.assignment.questKey].name} · ${activityText(state, adventurer)}`
             : activityText(state, adventurer) + '. Open a quest on the map to send them out.'),
-        adventurer.run ? h('button', {class: 'btn small', onclick: () => { showRun(ui, adventurer.id); ctx.refresh(); }}, 'Show run') : null,
+        adventurer.run ? h('button', {class: 'btn small', 'data-guide': 'showrun', onclick: () => { showRun(ui, adventurer.id); ctx.refresh(); }}, 'Show run') : null,
     );
 
     const equipList = h('div', {id: 'equipment'},
@@ -491,7 +493,8 @@ function adventurerPanel(ctx: Ctx, adventurer: Adventurer): HTMLElement {
                     class: 'item grow' + (ui.selectedSlot === slot ? ' selected' : ''),
                     title: slotNames[slot],
                     'aria-label': `${slotNames[slot]}: ${item ? item.name : blocked ? 'blocked by two-handed weapon' : 'empty'}`,
-                    'data-guide': !ref && ui.selectedSlot !== slot && hasFreeGear(state, adventurer, slot) ? 'equip' : undefined,
+                    // Any slot a free item fits, filled or not: a bought weapon replaces the starter one.
+                    'data-guide': ui.selectedSlot !== slot && hasFreeGear(state, adventurer, slot) ? 'equip' : undefined,
                     onclick: () => { ui.selectedSlot = ui.selectedSlot === slot ? null : slot; ctx.refresh(); },
                 },
                 h('span', {class: 'slot-art' + (item ? '' : ' empty')}, !ref ? itemTypeArt(emptySlotType(adventurer, slot)) : ref.kind === 'material' ? materialIcon(ref.key, 'typeart') : itemArt(item!.itemType, state.craftedItems.find(c => c.id === ref.id)?.base)),
@@ -652,6 +655,10 @@ export function runTrack(ctx: Ctx, adventurer: Adventurer): HTMLElement {
     // Endless runs show the current stretch of the pattern; there is no stopping point to set.
     const endlessAt = Math.max(0, fighting >= 0 ? fighting : run.defeatedAt ?? run.cleared + 1);
     const endlessStart = endlessAt - endlessAt % ENDLESS_PATTERN.length;
+    // The strip tutorial points at the third C (main.ts recallStep). Any use of the strip counts as
+    // having learned it.
+    const thirdC = quest.encounters.map((e, i) => e.tier === 'C' ? i : -1).filter(i => i >= 0)[2];
+    const used = () => { if (!ctx.state.guide?.stripUsed) ctx.state.guide = {...ctx.state.guide, stripUsed: true}; };
     return quest.endless ? h('div', {class: 'track'},
         ...quest.encounters.slice(endlessStart, endlessStart + ENDLESS_PATTERN.length).map((encounter, k) => {
             const i = endlessStart + k;
@@ -676,6 +683,7 @@ export function runTrack(ctx: Ctx, adventurer: Adventurer): HTMLElement {
             ev.preventDefault();
             track.setPointerCapture(ev.pointerId);
             const place = (i: number) => {
+                used();
                 setStopAt(adventurer, run.questKey, i);
                 const stop = adventurer.run?.stopAt ?? i;
                 track.querySelectorAll<HTMLElement>('.enc[data-enc]').forEach(el => {
@@ -699,8 +707,9 @@ export function runTrack(ctx: Ctx, adventurer: Adventurer): HTMLElement {
     },
         ...quest.encounters.map((encounter, i) => h('button', {
             'data-enc': String(i),
-            onclick: (ev: MouseEvent) => { if (ev.detail === 0) { setStopAt(adventurer, run.questKey, i); ctx.refresh(); } },
+            onclick: (ev: MouseEvent) => { if (ev.detail === 0) { used(); setStopAt(adventurer, run.questKey, i); ctx.refresh(); } },
             'aria-label': `Stop after encounter ${i + 1}`,
+            'data-guide': i === thirdC ? 'recall' : undefined,
             class: ['enc', encounter.tier,
                 i <= run.cleared ? 'cleared' : '',
                 i > run.stopAt ? 'beyond' : '',
@@ -1203,7 +1212,7 @@ function shopPanel(ctx: Ctx): HTMLElement {
             'data-guide': 'bench',
             disabled: state.gold < BENCH_PRICE,
             title: state.gold < BENCH_PRICE ? `Needs ${BENCH_PRICE} gold` : undefined,
-            onclick: () => { if (buyBench(state)) { ctx.ui.shopOpen = false; ctx.ui.benchOpen = true; } ctx.refresh(); },
+            onclick: () => { buyBench(state); ctx.refresh(); },
         }, `Buy · ${BENCH_PRICE} gold`),
     );
     if (!hero) {
@@ -1972,7 +1981,10 @@ function benchPanel(ctx: Ctx): HTMLElement {
     const filters = statFilters(ui);
     const seen = seenMaterials(state);
     const fadedType = (key: ItemTypeKey) => filters.length > 0 && !typeSupports(seen, key, filters);
+    // The crafting lesson lights the types a material in storage can be the base of.
+    const makeable = (key: ItemTypeKey) => Object.entries(state.materials).some(([m, n]) => n > 0 && !!getBaseStats(requireMaterial(m), key));
     const pickType = (key: ItemTypeKey) => {
+        if (!state.guide?.craftTypePicked && makeable(key)) state.guide = {...state.guide, craftTypePicked: true};
         bench.itemType = key;
         bench.base = bench.base.filter(m => getBaseStats(requireMaterial(m), key));
         ui.typeOpen = false;
@@ -1987,6 +1999,7 @@ function benchPanel(ctx: Ctx): HTMLElement {
                 title: fadedType(key) ? `${itemTypes[key].name}: none of your materials give a ${itemTypes[key].name.toLowerCase()} ${filterNames(filters)}` : itemTypes[key].name,
                 'aria-label': itemTypes[key].name,
                 'aria-pressed': String(key === bench.itemType),
+                'data-guide': makeable(key) ? 'craft-type' : undefined,
                 onclick: () => pickType(key),
             }, itemTypeArt(key), labeled ? h('span', {class: 'typetile-name'}, itemTypes[key].name) : null))))))));
     const chips = typeFacts(type).map(f => h('span', {class: 'typechip'}, f));
@@ -2001,7 +2014,7 @@ function benchPanel(ctx: Ctx): HTMLElement {
                 h('span', {class: 'typechips'}, ...chips, leanText ? h('span', {class: 'typechip lean', title: 'Stats this type scales up'}, `leans ${leanText}`) : null))),
         // Narrow screens: the chosen type, with Change opening the grouped chooser.
         h('div', {class: 'typepick-narrow'},
-            h('button', {class: 'typebar', 'aria-expanded': String(!!ui.typeOpen), 'aria-label': `Item type: ${type.name}. ${ui.typeOpen ? 'Close the list' : 'Change it'}`, onclick: () => { ui.typeOpen = !ui.typeOpen; ctx.refresh(); }},
+            h('button', {class: 'typebar', 'aria-expanded': String(!!ui.typeOpen), 'data-guide': ui.typeOpen ? undefined : 'craft-type', 'aria-label': `Item type: ${type.name}. ${ui.typeOpen ? 'Close the list' : 'Change it'}`, onclick: () => { ui.typeOpen = !ui.typeOpen; ctx.refresh(); }},
                 h('span', {class: 'typebar-icon'}, itemTypeArt(bench.itemType)),
                 h('span', {class: 'typebar-mid'},
                     h('span', {class: 'typesum-name'}, type.name),
@@ -2017,7 +2030,7 @@ function benchPanel(ctx: Ctx): HTMLElement {
             h('button', {
                 class: 'slotpick grow',
                 // The first craft: the empty first base slot, then a material, then Craft + equip.
-                'data-guide': kind === 'base' && index === 0 && !key && !picking && !bench.base.length ? 'craft'
+                'data-guide': kind === 'base' && index === 0 && !key && !picking && !bench.base.length ? 'craft-base'
                     : kind === 'decoration' && !key && !unsupported && !picking && ui.decoSkipped && !state.guide?.decorated && hasUsableDecoration(state, bench) ? 'deco' : undefined,
                 'aria-label': `Choose ${kind} material ${index + 1}${invalid ? ' (invalid)' : ''}`,
                 onclick: () => { ui.picker = picking ? null : {kind, index}; ctx.refresh(); },
@@ -2051,7 +2064,7 @@ function benchPanel(ctx: Ctx): HTMLElement {
     const equipWhy = !hero ? 'No hero selected' : invalidCount ? 'Remove or replace the invalid decorations first' : hero.level < equipNeed ? `${hero.name} needs level ${equipNeed}` : null;
     const craftEquipButton = (slot: SlotKey, label: string, cls: string) => h('button', {
         class: cls,
-        'data-guide': cls.includes('primary') && bench.base.length && !equipWhy ? 'craft' : undefined,
+        'data-guide': bench.base.length && !equipWhy ? 'craft-make' : undefined,
         disabled: !!equipWhy,
         title: equipWhy ?? `Craft it and equip it in ${hero!.name}'s ${slotNames[slot].toLowerCase()}`,
         onclick: () => {
@@ -2088,6 +2101,7 @@ function benchPanel(ctx: Ctx): HTMLElement {
             primarySlot ? craftEquipButton(primarySlot, 'Craft + equip', 'btn primary') : null,
             h('button', {
                 class: 'btn' + (primarySlot ? '' : ' primary'),
+                'data-guide': invalidCount ? undefined : 'craft-make',
                 disabled: invalidCount > 0,
                 title: invalidCount ? 'Remove or replace the invalid decorations first' : undefined,
                 onclick: () => {
@@ -2513,7 +2527,8 @@ export function renderPickerPanel(ctx: Ctx): HTMLElement | null {
                 : null,
         ) : null;
         (used ? usedRows : rows).push(h('div', {class: 'pickrow' + (o.key === current ? ' selected' : '') + (locked ? ' locked' : ' pickable'),
-            'data-guide': picker.kind === 'base' && !bench.base.length && !locked ? 'craft' : undefined,
+            // The crafting lesson: the first base material, then any decoration (or Close).
+            'data-guide': locked ? undefined : picker.kind === 'base' && !bench.base.length ? 'craft-base' : 'craft-deco',
             onclick: locked ? undefined : () => choose(o.key)},
             h('div', {class: 'grow pickmain'},
                 tooStrong
@@ -2547,7 +2562,7 @@ export function renderPickerPanel(ctx: Ctx): HTMLElement | null {
                 h('h2', null, title),
                 h('div', {class: 'muted small'}, `Materials for a ${type.name.toLowerCase()}`),
             ),
-            h('button', {class: 'btn', onclick: () => { if (picker.kind === 'decoration' && !bench.decorations[picker.index]) ui.decoSkipped = true; ui.picker = null; ctx.refresh(); }}, 'Close'),
+            h('button', {class: 'btn', 'data-guide': bench.base.length ? 'craft-deco' : undefined, onclick: () => { if (picker.kind === 'decoration' && !bench.decorations[picker.index]) ui.decoSkipped = true; ui.picker = null; ctx.refresh(); }}, 'Close'),
         ),
         h('div', {class: 'panel-body'},
             h('div', {class: 'muted small'}, filters.length ? `Showing materials with ${filterNames(filters)}. Change the filters at the top of the bench.` : 'Strongest first. Click a stat to filter by it.'),
@@ -3008,23 +3023,34 @@ function expansionSection(ctx: Ctx): HTMLElement | null {
             const newClasses = Object.values(classes).filter(c => c.tier === x.t).map(c => c.name);
             return `${x.name} applicants from ${x.at} fame${newClasses.length ? ` (${newClasses.join(', ')})` : ''}`;
         });
+    const afford = state.gold >= e.gold;
+    const can = ready && afford;
+    const level = Math.max(0, Math.min(guildHallSizes.length - 1, state.expansion ?? 0));
+    const url = siteArtUrl(`guild-${level}`) ?? siteArtUrl('guild');
+    const [w, hgt] = guildHallSizes[level];
+    // The hall fits a 96px box by its larger side; three chevrons rise beside it.
+    const k = 96 / Math.max(w, hgt);
+    const status = !ready ? `Needs ${e.fame} fame` : !afford ? `Needs ${e.gold} gold (${Math.floor(state.gold)}/${e.gold})` : 'Ready to expand';
     return h('div', {id: 'guild-expansion'},
-        h('h3', null, `Guild expansion ${e.level}`),
-        h('div', {class: 'expansion row small'},
-            h('span', {class: 'grow'},
-                h('div', null, ready ? `Ready: you have ${state.fame} fame` : `Needs ${e.fame} fame (${state.fame}/${e.fame})`),
-                h('div', {class: 'mods'}, `Makes available: ${opens.join(', ')}`),
-                arriving.length ? h('div', {class: 'mods'}, `Around this fame: ${arriving.join('; ')}`) : null),
-            h('button', {
-                class: 'btn small' + (ready ? ' primary' : ''),
-                disabled: !ready || state.gold < e.gold,
-                title: !ready ? `Needs ${e.fame} fame (you have ${state.fame})` : state.gold < e.gold ? `Needs ${e.gold} gold` : `Expand the guild for ${e.gold} gold`,
-                onclick: () => {
-                    expandGuild(state);
-                    ctx.refresh();
-                },
-            }, `Expand · ${e.gold} gold`),
-        ),
+        h('h3', null, 'Guild expansion'),
+        h('button', {
+            class: 'expandcard' + (can ? ' can' : ready ? ' short' : ' locked'),
+            disabled: !can,
+            'aria-label': `Guild expansion ${e.level}: ${status}. Costs ${e.gold} gold. Makes available ${opens.join(', ')}`,
+            onclick: () => { if (expandGuild(state)) ctx.refresh(); },
+        },
+            h('span', {class: 'xart'},
+                url ? h('img', {src: url, alt: '', draggable: 'false', style: `width:${Math.round(w * k)}px;height:${Math.round(hgt * k)}px`}) : null,
+                h('span', {class: 'xarrows', 'aria-hidden': 'true'}, svg('<svg viewBox="0 0 24 40"><path d="M4 14 12 6l8 8"/><path d="M4 24l8-8 8 8"/><path d="M4 34l8-8 8 8"/></svg>'))),
+            h('span', {class: 'xbody'},
+                h('span', {class: 'xkicker'}, `Expansion ${e.level}`),
+                h('span', {class: 'xtitle'}, 'Expand the guild hall'),
+                h('span', {class: 'xfame'},
+                    h('span', {class: 'xbar'}, h('span', {style: `width:${Math.min(100, 100 * state.fame / e.fame)}%`})),
+                    h('span', {class: 'num'}, ready ? `${e.fame} fame reached` : `${state.fame}/${e.fame} fame`)),
+                h('span', {class: 'xopens'}, ...opens.map(o => h('span', {class: 'chip'}, o))),
+                arriving.length ? h('span', {class: 'mods'}, `Around this fame: ${arriving.join('; ')}`) : null,
+                h('span', {class: 'xcta'}, can ? `Expand · ${e.gold} gold` : status))),
     );
 }
 

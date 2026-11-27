@@ -702,7 +702,12 @@ export interface GameState {
     // false until the crafting bench is bought. Saves from before the merchant have it.
     benchOwned?: boolean
     // Steps of the opening guidance that are done.
-    guide?: {firstRunDone?: boolean, firstSend?: boolean, bought?: boolean, equipped?: boolean, crafted?: boolean, manualEquip?: boolean, fameGoalDone?: boolean, decorated?: boolean, modifierToggled?: boolean}
+    guide?: {firstRunDone?: boolean, firstSend?: boolean, bought?: boolean, equipped?: boolean, crafted?: boolean, manualEquip?: boolean, fameGoalDone?: boolean, decorated?: boolean, modifierToggled?: boolean
+        // v342 onboarding: dialogs seen (by key), tutorial chains skipped, Skip all tutorials, the
+        // encounter strip used at least once, and the strip tutorial finished.
+        seen?: Record<string, boolean>, skipped?: Record<string, boolean>, skipAll?: boolean, stripUsed?: boolean, recallTaught?: boolean
+        // The strip lesson is due (the hero reached its encounter); the crafting lesson's item type step is done.
+        stripDue?: boolean, craftTypePicked?: boolean, trophyTaught?: boolean, storySeeded?: boolean}
     questProgress: Record<string, QuestProgress>
     // The hire panel's current applicants.
     applicants?: Applicant[]

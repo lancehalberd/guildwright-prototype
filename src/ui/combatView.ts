@@ -75,6 +75,8 @@ function renderAilments(el: HTMLElement, a: Ailments | undefined, extra: [string
     el.replaceChildren(...parts.map(([k, t]) => h('span', {class: 'ailb ' + k}, t)));
 }
 
+// The guild background's fade (style.css .arena-bg transition) plus a little slack.
+const GUILD_FADE_MS = 900;
 export class CombatView {
     readonly el: HTMLElement;
     private readonly heroEl: HTMLElement;
@@ -126,6 +128,12 @@ export class CombatView {
     private heroShown = 0;
     // The hero is shown resting at the guild (the battle view fades to the guild background).
     resting = false;
+    // When the view settled on the resting hero (the guild fade starts then), for restShown().
+    private restingSince: number | null = null;
+    // The view has moved to the resting hero and finished fading to the guild.
+    restShown(): boolean {
+        return this.restingSince !== null && performance.now() - this.restingSince >= GUILD_FADE_MS;
+    }
     // The run on show (quest and run number). A new one starts from a clean arena.
     private runSig = '';
     // Delayed parts of shown events (staggered bars, flashes) still to come; reset cancels them.
@@ -472,6 +480,7 @@ export class CombatView {
             this.heroEl.hidden = false;
             this.heroEl.classList.remove('resting', 'down');
             this.resting = false;
+            this.restingSince = null;
             this.el.classList.remove('at-guild');
             this.idleSince = null;
             this.heroDown = false;
@@ -499,6 +508,8 @@ export class CombatView {
             // While resting, the hero stays where they fight, faded, with their HP filling back up.
             const resting = cleared && a.kind === 'resting';
             this.resting = resting;
+            if (!resting) this.restingSince = null;
+            else this.restingSince ??= performance.now();
             // A rest before a boss or bonus fight happens on site, so it keeps the quest's background.
             const onSite = a.kind === 'resting' && !a.defeated && !!pendingExtraFight(adventurer);
             this.el.classList.toggle('at-guild', resting && !onSite && hasGuild);
